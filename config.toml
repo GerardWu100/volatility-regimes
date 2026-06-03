@@ -1,0 +1,85 @@
+[data]
+# Underlying symbols to run the full pipeline for.
+# symbols = ["SPX"]
+# symbols = ["NDX"]
+symbols = ["SPX", "NDX"]
+
+# Inclusive start date for historical query window.
+start_date = "2010-01-04"
+
+# Inclusive end date for historical query window.
+end_date = "2024-12-31"
+
+# ClickHouse connection loaded from .env (not stored in config)
+
+[cache]
+# Cache mode policy. offline_first means use valid local cache first,
+# otherwise query ClickHouse and refresh cache.
+# mode = "offline_first"  # options: "offline_first"
+mode = "offline_first"
+
+# Required raw-data directory relative to project root.
+# This folder must contain required Parquet inputs + metadata sidecars for
+# offline runs on fresh clones.
+required_dir = "data/raw"
+
+# Metadata schema version required in sidecar files.
+metadata_version = 1
+
+# Require cached data coverage to include the full configured date range.
+require_full_date_coverage = true
+
+[features]
+# Target ATM absolute delta used for ATM IV extraction (puts at -0.50).
+atm_delta = 0.50
+
+# Absolute wing delta used for skew and butterfly (for example 25-delta).
+wing_delta = 0.25
+
+# Minimum absolute delta filter to remove deep OTM strikes.
+delta_min = 0.05
+
+# Maximum absolute delta filter to remove deep ITM strikes.
+delta_max = 0.95
+
+# Minimum number of strikes required per side (puts and calls) per expiry.
+min_strikes_per_side = 5
+
+# Expiry buckets (days to expiration)
+# Minimum DTE for near-term expiry selection bucket.
+near_term_dte_min = 15
+
+# Target DTE for near-term expiry selection (closest expiry is used).
+near_term_dte_target = 30
+
+# Maximum DTE for near-term expiry selection bucket.
+near_term_dte_max = 45
+
+# Minimum DTE for mid-term expiry selection bucket.
+mid_term_dte_min = 45
+
+# Target DTE for mid-term expiry selection (closest expiry is used).
+mid_term_dte_target = 90
+
+# Maximum DTE for mid-term expiry selection bucket.
+mid_term_dte_max = 120
+
+[regime]
+# Minimum number of regimes (K) evaluated in GMM model selection.
+min_k = 2
+
+# Maximum number of regimes (K) evaluated in GMM model selection.
+max_k = 6
+
+# Maximum expectation-maximization iterations for each HMM fit.
+hmm_n_iter = 200
+
+# Number of random restarts for HMM; highest log-likelihood fit is retained.
+hmm_random_restarts = 10
+
+[analysis]
+# Forward-looking realized volatility window in trading days.
+realized_vol_window = 20
+
+# Trading-day annualization factor for volatility scaling.
+annualization_factor = 252

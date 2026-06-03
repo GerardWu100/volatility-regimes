@@ -1,0 +1,41 @@
+__pycache__/
+*.pyc
+.venv/
+outputs/
+logs/*
+!logs/.gitkeep
+.env
+*.egg-info/
+
+# Ignore cache artifacts by default.
+data/cache/**
+
+# Track required offline-first raw inputs.
+!data/raw/
+!data/raw/*.parquet
+!data/raw/*.metadata.json
+
+# Local secrets, credentials, and machine-specific state.
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.csr
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+credentials.json
+client_secret*.json
+secrets.json
+secrets.toml
+*.token
+*.secret
+.netrc
+.DS_Store
+.vscode/
+.idea/
+*.log

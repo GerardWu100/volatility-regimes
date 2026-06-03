@@ -1,0 +1,14 @@
+{
+  "metadata_version": 1,
+  "dataset": "prices",
+  "symbol": "SPX",
+  "row_count": 3912,
+  "date_coverage": {
+    "start": "2010-01-04",
+    "end": "2024-12-31"
+  },
+  "schema": {
+    "date": "datetime64[us]",
+    "close": "float64"
+  }
+}

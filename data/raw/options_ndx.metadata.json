@@ -1,0 +1,21 @@
+{
+  "metadata_version": 1,
+  "dataset": "options",
+  "symbol": "NDX",
+  "row_count": 78240,
+  "date_coverage": {
+    "start": "2010-01-04",
+    "end": "2024-12-31"
+  },
+  "schema": {
+    "trade_date": "datetime64[us]",
+    "expiry_date": "datetime64[us]",
+    "option_type": "str",
+    "strike_price": "float64",
+    "mid_iv": "float64",
+    "delta": "float64",
+    "volume": "int64",
+    "open_interest": "int64",
+    "dte": "int64"
+  }
+}

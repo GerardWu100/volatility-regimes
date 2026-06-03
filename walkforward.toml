@@ -1,0 +1,45 @@
+[sample]
+# Symbols to include in the walk-forward research run.
+symbols = ["SPX", "NDX"]
+
+# Inclusive start date for the experiment sample.
+start_date = "2010-01-04"
+
+# Inclusive end date for the experiment sample.
+end_date = "2024-12-31"
+
+[evaluation]
+# Default demo horizon in trading days. Use [5, 20, 60] for the full study.
+horizons = [20]
+
+# Feature subsets to compare.
+feature_sets = ["atm_term"]
+
+# Initial expanding-window history length in trading days.
+min_train_size = 3880
+
+# Number of test rows advanced per split.
+step_size = 5
+
+# Annualization factor used in volatility targets.
+annualization = 252
+
+[regime]
+# Minimum state count for BIC-based GMM selection.
+min_k = 2
+
+# Maximum state count for BIC-based GMM selection.
+max_k = 3
+
+# Fixed K values for robustness runs.
+fixed_k_values = []
+
+# HMM expectation-maximization iteration cap.
+hmm_n_iter = 200
+
+# HMM random restart count for the default demo run.
+hmm_random_restarts = 5
+
+[output]
+# Output directory relative to repository root.
+output_dir = "outputs/reports/walkforward"
