@@ -30,12 +30,21 @@ $$
 
 where $r_t = \log(P_t / P_{t-1})$ is the daily log return and $A = 252$ is the annualization factor.
 
-The walk-forward layer compares four baseline ideas:
+The walk-forward layer compares five forecast ideas:
 
 - current ATM implied volatility
+- the expanding historical mean of realized volatility
 - trailing realized volatility
 - a linear regression on selected surface features
 - a Gaussian Mixture Model regime-mean forecast
+
+`min_train_size` counts leakage-safe labelled rows after the forward-target
+embargo. The default `2520` is approximately ten trading years. Candidate
+splits that leave fewer safe labels are skipped, and an impossible experiment
+fails before model fitting with the aligned row count, maximum safe training
+count, and requested minimum. Forecast models fit once per test block; this is
+equivalent to row-by-row refitting because every row in a block shares the same
+training window.
 
 Optional robustness sweeps can add fixed-`K` regime models when enabled in
 `walkforward.toml`.
@@ -76,3 +85,6 @@ Where to start:
 
 - 2026-05-20: Aligned repository layout with standard `src/`, `scripts/`,
   `tests/unit`, `tests/integration`, `docs/user`, and split output dirs.
+- 2026-07-13: Defined `min_train_size` after embargo, replaced the impossible
+  3,880-row default with a ten-year safe window, added fail-fast capacity
+  checks and a historical-mean benchmark, and fit models once per test block.

@@ -12,9 +12,9 @@ Une surface d'options évolue rarement comme un seul chiffre. La volatilité imp
 
 Ce projet pose une question plus précise : si je ramène chaque surface quotidienne du SPX et du NDX à un petit vecteur de caractéristiques, les états latents améliorent-ils la prévision de la volatilité réalisée sur les 20 prochaines séances ?
 
-Le code comporte deux volets. Le pipeline descriptif repère des états sur l'échantillon complet. Le pipeline walk-forward réestime les modèles sur le passé, prédit un bloc à la fois et compare la prévision par régime à trois références : la volatilité implicite at-the-money courante, la volatilité réalisée historique et une régression linéaire. La distinction entre les deux volets est décisive. Un graphique de clusters bien net montre que la surface possède une structure. Il ne prouve pas que cette structure permet de prévoir la suite.
+Le code comporte deux volets. Le pipeline descriptif repère des états sur l'échantillon complet. Le pipeline walk-forward réestime les modèles sur le passé, prédit un bloc à la fois et compare la prévision par régime à la volatilité implicite at-the-money courante, à la moyenne historique croissante, à la volatilité réalisée historique et à une régression linéaire. La distinction entre les deux volets est décisive. Un graphique de clusters bien net montre que la surface possède une structure. Il ne prouve pas que cette structure permet de prévoir la suite.
 
-Le dépôt fournit des données de démonstration portables pour 3 912 séances, du 2010-01-04 au 2024-12-31. Les résultats ci-dessous décrivent cet échantillon suivi par Git. Ils ne remplacent pas une étude de production fondée sur un historique fournisseur vérifié séparément.
+Le dépôt fournit des données de démonstration portables pour 3,912 séances, du 2010-01-04 au 2024-12-31. Les résultats ci-dessous décrivent cet échantillon suivi par Git. Ils ne remplacent pas une étude de production fondée sur un historique fournisseur vérifié séparément.
 
 ## Une surface quotidienne résumée en sept chiffres
 
@@ -47,7 +47,7 @@ term_slope = atm_iv_mid - atm_iv_near
 
 ## Ce que fait le modèle d'états latents
 
-Chaque colonne est standardisée avec sa moyenne et son écart-type dans l'échantillon. Soit $x_t$ le vecteur ainsi obtenu, de dimension sept. Un modèle de mélange gaussien à $K$ composantes lui attribue la densité suivante :
+Chaque colonne est standardisée avec sa moyenne et son écart-type. Le graphique descriptif utilise les estimations de l'échantillon complet. Chaque ajustement walk-forward estime son échelle sur la seule fenêtre d'entraînement. Soit $x_t$ le vecteur de dimension $d$ ainsi obtenu. Le modèle descriptif complet prend $d=7$, tandis que la prévision par défaut utilise $d=3$ : ATM proche, ATM intermédiaire et pente de terme. Un modèle de mélange gaussien, ou GMM, à $K$ composantes lui attribue la densité suivante :
 
 $$
 p(x_t)=\sum_{k=1}^{K}\pi_k\,\mathcal{N}(x_t\mid\mu_k,\Sigma_k),
@@ -61,7 +61,13 @@ $$
 \mathrm{BIC}_K=-2\ell_K+p_K\log n,
 $$
 
-où $\ell_K$ est la log-vraisemblance ajustée, $p_K$ le nombre de paramètres estimés et $n$ le nombre d'observations quotidiennes. La pénalité empêche la vraisemblance de récompenser indéfiniment l'ajout d'états.
+où $\ell_K$ est la log-vraisemblance ajustée, $p_K$ le nombre de paramètres estimés et $n$ le nombre d'observations quotidiennes. Avec des matrices de covariance complètes en dimension $d$, le nombre de paramètres vaut
+
+$$
+p_K=(K-1)+Kd+K\frac{d(d+1)}{2}.
+$$
+
+Les trois termes comptent les poids indépendants du mélange, les moyennes des composantes et les éléments distincts des matrices de covariance. La pénalité empêche la vraisemblance de récompenser indéfiniment l'ajout d'états. Le pipeline descriptif considère $K=2,\ldots,6$. La configuration walk-forward considère $K\in\{2,3\}$ dans chaque fenêtre d'entraînement.
 
 Les étiquettes d'un mélange n'ont pas d'ordre naturel. Le projet les trie donc selon leur volatilité implicite ATM proche moyenne. Le régime 0 correspond au niveau implicite le plus faible. Les numéros suivants correspondent à des niveaux moyens de plus en plus élevés. Ce tri facilite la lecture, mais il ne transforme pas un cluster non supervisé en prévision de risque.
 
@@ -129,43 +135,76 @@ for train_date in train_index:
 
 Ce détail apporte davantage de crédibilité qu'un modèle d'états supplémentaire. Sans cet embargo, la fenêtre croissante paraît causale alors que ses étiquettes franchissent discrètement la frontière du test.
 
-## Ce que montre l'échantillon portable
+## Réparer une expérience qui ne pouvait pas démarrer
 
-J'ai régénéré l'analyse descriptive à partir des fichiers Parquet suivis par Git avec `blog/generate_charts.py`. Le script reprend les sept définitions de caractéristiques, la standardisation, les mélanges gaussiens à covariance complète, les cinq initialisations, la graine aléatoire 42 et la sélection par BIC du package.
+La configuration initiale demandait 3,880 lignes d'entraînement. Chaque symbole compte 3,912 lignes complètes de caractéristiques. La cible future à 20 jours supprime les 20 dernières lignes, tandis que la référence de volatilité réalisée historique exige 20 rendements passés au début. Le panel commun ne contient donc plus que 3,872 lignes, soit moins que la fenêtre demandée avant même d'appliquer l'embargo.
 
-| Symbol | Selected K | Lowest-regime ATM IV | Highest-regime ATM IV | Lowest-regime forward RV | Highest-regime forward RV |
-|:--|--:|--:|--:|--:|--:|
-| SPX | 5 | 10.01% | 19.96% | 15.25% | 14.65% |
-| NDX | 3 | 11.47% | 20.26% | 15.07% | 14.83% |
+Écrire silencieusement des fichiers CSV vides n'était pas le bon comportement. Le contrat corrigé définit `min_train_size` comme le nombre de lignes étiquetées qui subsistent après l'embargo. Sa nouvelle valeur est 2,520, soit environ dix années de bourse. Le moteur ignore les premiers découpages candidats jusqu'à disposer de 2,520 étiquettes admissibles. Un contrôle préalable calcule aussi l'historique maximal qui peut laisser une observation de test. Une demande impossible déclenche maintenant une erreur qui indique le nombre de lignes alignées, le maximum admissible et le minimum demandé.
 
-![Moyennes de volatilité implicite et réalisée future par régime descriptif ordonné](images/02_regime_profiles.png)
+Les cinq dates d'un bloc de test partagent une fenêtre d'entraînement fixe. Les modèles linéaire et GMM sont maintenant ajustés une fois pour le bloc, puis évaluent les cinq lignes. Ce changement supprime des calculs répétés sans modifier l'ensemble d'information ni les prévisions. La première prévision valide tombe le 2019-10-28. La dernière tombe le 2024-12-03, car les dates restantes de décembre ne disposent pas encore d'une cible future complète à 20 jours.
 
-Les courbes bleues montent par construction : les régimes sont ordonnés selon la volatilité implicite ATM proche. Les courbes orange, elles, ne montent pas. Dans ces données de démonstration, la volatilité réalisée moyenne sur les 20 séances suivantes reste proche de 15 pour cent dans tous les états. Pour le SPX, elle est même légèrement plus faible dans l'état le plus élevé que dans le plus bas. Pour le NDX, elle est presque plate.
+## Mesurer la perte de prévision
 
-La prime de risque de variance correspond ici à la volatilité implicite ATM moins la volatilité réalisée future. Dans le régime SPX le plus bas, sa moyenne vaut −5.24 points de pourcentage. Dans le plus haut, elle atteint +5.31 points. L'essentiel de cet écart vient de la volatilité implicite, sans évolution comparable de la volatilité réalisée par la suite.
-
-![Volatilité implicite ATM proche face à la volatilité réalisée sur les 20 séances suivantes](images/03_atm_vs_forward_rv.png)
-
-Le nuage de points raconte la même histoire sans moyenne par groupe. La corrélation entre la volatilité implicite ATM proche courante et la volatilité réalisée sur les 20 séances suivantes vaut −0.05 pour le SPX et −0.04 pour le NDX. Ces chiffres décrivent les données portables. Je ne les utiliserais pas pour une position ou une limite de risque. Ils suffisent toutefois à montrer qu'un graphique de régimes ne répond pas, à lui seul, à la question prédictive.
-
-## Pourquoi il n'y a pas de tableau de victoire hors échantillon
-
-La configuration par défaut exige une fenêtre d'entraînement initiale de 3 880 lignes. Chaque symbole compte 3 912 lignes complètes de caractéristiques. La cible future à 20 jours élimine les 20 dernières lignes, tandis que la référence de volatilité réalisée historique exige 20 jours d'historique au début. Après ces deux alignements, il reste 3 872 lignes. C'est moins que la taille minimale d'entraînement, donc le run walk-forward configuré produit à juste titre un panel de prévisions vide.
-
-Abaisser le seuil après avoir vu ce résultat reviendrait à fabriquer une conclusion pour l'article. Je n'ai pas modifié la configuration de recherche.
-
-Lorsqu'il existe des prévisions, le module de reporting calcule la racine de l'erreur quadratique moyenne, ou RMSE, l'erreur absolue moyenne, ou MAE, et un score hors échantillon relatif à la volatilité implicite ATM. Soit $\mathrm{MSE}_{m}$ l'erreur quadratique moyenne du modèle $m$ et $\mathrm{MSE}_{\mathrm{ATM}}$ celle de la référence sur les mêmes dates. Le score relatif est :
+Soit $y_t$ la volatilité réalisée et $\hat y_{m,t}$ la prévision du modèle $m$ à la date $t$. Pour $N$ dates de prévision, l'erreur est $e_{m,t}=y_t-\hat y_{m,t}$. L'erreur quadratique moyenne, ou MSE, sa racine, ou RMSE, et l'erreur absolue moyenne, ou MAE, sont
 
 $$
-R^2_{\mathrm{OOS},m}=1-\frac{\mathrm{MSE}_{m}}{\mathrm{MSE}_{\mathrm{ATM}}}.
+\begin{aligned}
+\mathrm{MSE}_m &= \frac{1}{N}\sum_{t=1}^{N}e_{m,t}^2, \\
+\mathrm{RMSE}_m &= \sqrt{\mathrm{MSE}_m}, \\
+\mathrm{MAE}_m &= \frac{1}{N}\sum_{t=1}^{N}|e_{m,t}|.
+\end{aligned}
 $$
 
-Une valeur positive indique que le modèle $m$ réduit l'erreur quadratique par rapport à l'ATM courant. Zéro correspond à une égalité. Une valeur négative signifie que le modèle plus élaboré fait moins bien.
+La RMSE et la MAE ont la même unité décimale annualisée que la cible. Le graphique les multiplie par 100 : 0.024924 devient 2.4924 points de pourcentage de volatilité.
 
-## L'expérience suivante
+Pour une référence $b$, le score relatif hors échantillon est
 
-Le prochain run doit réserver assez d'observations intactes pour juger les modèles. Je fixerais la fenêtre initiale avant d'examiner les erreurs, je conserverais l'embargo de 20 jours et je publierais les résultats par blocs temporels contigus, en plus du score agrégé. Une méthode de régimes qui ne gagne que sur une portion lisse de la série portable ne constitue pas une preuve convaincante.
+$$
+R^2_{\mathrm{OOS},m\mid b}=1-\frac{\mathrm{MSE}_m}{\mathrm{MSE}_b}.
+$$
 
-Je comparerais aussi les ensembles de caractéristiques déjà déclarés dans le package : ATM seul, ATM avec structure par terme, ATM avec skew, smile de l'échéance proche et vecteur complet à sept dimensions. Cette comparaison permet de vérifier si la forme de la surface apporte quelque chose au-delà du niveau de volatilité qui sert à ordonner les états.
+Une valeur positive indique que le modèle $m$ produit une erreur quadratique plus faible que la référence $b$ sur les mêmes dates. Le rapport calcule ce score par rapport à l'ATM implicite courant et à la moyenne historique croissante. La seconde comparaison est la plus exigeante : elle vérifie si le modèle apporte de l'information au-delà du niveau inconditionnel de la cible observé jusque-là.
 
-L'ordre de recherche du projet est sain. Il extrait la surface, trouve des états lisibles, définit une cible future, retire les étiquettes qui se chevauchent, puis compare le résultat à des prévisions simples. L'échantillon suivi par Git permet d'étudier les deux premières étapes et d'exercer le code des suivantes. Il ne permet pas encore d'affirmer que les régimes latents améliorent la prévision de la volatilité réalisée.
+## Le résultat corrigé
+
+Le run par défaut produit 1,332 prévisions par symbole à un horizon de 20 jours. Chaque fenêtre d'entraînement choisit $K$ par BIC dans $\{2,3\}$. Le SPX utilise deux états sur 1,022 dates de prévision et trois sur 310. Le NDX en utilise deux sur 1,012 dates et trois sur 320.
+
+| Symbol | Model | RMSE (pp) | MAE (pp) | $R^2_{\mathrm{OOS}}$ vs historical mean |
+|:--|:--|--:|--:|--:|
+| SPX | Historical mean | 2.4924 | 2.0243 | 0.0000 |
+| SPX | GMM regime mean | 2.4932 | 2.0305 | -0.0007 |
+| SPX | Linear features | 2.4999 | 2.0342 | -0.0061 |
+| SPX | Trailing realized volatility | 3.6150 | 2.8981 | -1.1038 |
+| SPX | Current ATM IV | 4.7103 | 3.9488 | -2.5717 |
+| NDX | Historical mean | 2.5297 | 2.0374 | 0.0000 |
+| NDX | GMM regime mean | 2.5442 | 2.0491 | -0.0115 |
+| NDX | Linear features | 2.5355 | 2.0336 | -0.0046 |
+| NDX | Trailing realized volatility | 3.8561 | 3.0798 | -1.3235 |
+| NDX | Current ATM IV | 5.2400 | 4.3312 | -3.2907 |
+
+![Out-of-sample RMSE for five realized-volatility forecasts](images/02_oos_rmse.png)
+
+La moyenne par régime réduit fortement la RMSE par rapport à l'ATM implicite courant, mais la moyenne historique croissante fait légèrement mieux pour les deux symboles. L'écart de RMSE n'est que de 0.0008 point de pourcentage pour le SPX. Il atteint 0.0145 point pour le NDX. La régression linéaire reste elle aussi très proche. Dans cet échantillon, la structure de surface n'améliore pas la prévision quadratique agrégée par rapport à une moyenne inconditionnelle lentement révisée.
+
+Cette comparaison change aussi la lecture du résultat ATM. La volatilité implicite est un prix sous probabilité risque-neutre qui contient une prime de risque de variance, tandis que la volatilité réalisée est un résultat sous la mesure physique. La poche d'options proche vise environ 30 jours calendaires et la cible couvre 20 séances. Une forte erreur de l'ATM ne prouve pas une erreur de prix exploitable. Le battre n'isole pas non plus une information propre aux régimes.
+
+![Cumulative GMM squared-error loss minus historical-mean loss](images/03_cumulative_loss_difference.png)
+
+La différence de perte cumulée utilise les erreurs quadratiques en points de pourcentage. Une courbe descendante favorise le GMM. Une courbe montante favorise la moyenne historique. Le SPX gagne nettement pendant une partie de 2020 et de 2021, puis rend cet avantage et termine à +5.68 points de pourcentage au carré. Le NDX termine à +98.01. Le chemin est instable, même lorsque l'écart final du SPX paraît minuscule.
+
+## Ce que le résultat établit, et ses limites
+
+L'hypothèse centrale échoue sur les données de démonstration avec cette configuration. Les régimes GMM décrivent nettement la surface d'options, mais leurs moyennes conditionnelles ne battent pas la moyenne historique croissante entre le 2019-10-28 et le 2024-12-03.
+
+Cette conclusion reste étroite pour quatre raisons. Les fichiers Parquet suivis par Git sont des données pédagogiques, pas un historique fournisseur vérifié indépendamment. Le run ne teste qu'un horizon de 20 jours et l'ensemble de trois colonnes `atm_term`. Les cibles adjacentes partagent 19 rendements sur 20. Les 1,332 erreurs quotidiennes ne constituent donc pas 1,332 observations indépendantes. Le rapport fournit des estimations ponctuelles sans inférence corrigée du chevauchement. Enfin, la sélection du nombre d'états par BIC et les paramètres sont réestimés toutes les cinq dates. Ce choix coûte du temps de calcul, et le résultat peut dépendre du calendrier de réestimation.
+
+Une étude de production devrait figer son protocole avant d'observer les pertes, tester les ensembles de caractéristiques déclarés et plusieurs horizons, puis publier des résultats sur blocs non chevauchants ou une incertitude corrigée de l'hétéroscédasticité et de l'autocorrélation. Elle devrait aussi vérifier le calibrage sur de vraies cotations d'options : qualité des cotations, conventions de delta, interpolation des échéances et distinction entre volatilité implicite et physique.
+
+## Références primaires
+
+- Dempster, Laird, and Rubin (1977), [“Maximum Likelihood from Incomplete Data via the EM Algorithm”](https://doi.org/10.1111/j.2517-6161.1977.tb01600.x), pour l'estimation par espérance-maximisation.
+- Schwarz (1978), [“Estimating the Dimension of a Model”](https://doi.org/10.1214/aos/1176344136), pour le critère d'information bayésien.
+- Andersen, Bollerslev, Diebold, and Labys (2003), [“Modeling and Forecasting Realized Volatility”](https://doi.org/10.1111/1468-0262.00418), pour la mesure et la prévision de la volatilité réalisée.
+- Campbell and Thompson (2008), [“Predicting Excess Stock Returns Out of Sample: Can Anything Beat the Historical Average?”](https://doi.org/10.1093/rfs/hhm055), pour la moyenne historique comme référence et le score relatif $R^2$ hors échantillon.
+
+Le résultat utile est l'échec de la comparaison. Dès que la moyenne inconditionnelle entre dans le panel, l'avantage apparent des régimes disparaît.

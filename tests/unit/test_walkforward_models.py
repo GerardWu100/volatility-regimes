@@ -27,6 +27,15 @@ def test_forecast_atm_iv_returns_current_atm_iv() -> None:
     assert forecast_value == 0.24
 
 
+def test_forecast_historical_mean_uses_only_training_targets() -> None:
+    """Return the arithmetic mean of the supplied leakage-safe targets."""
+    from volatility_regimes.walkforward.models import forecast_historical_mean
+
+    train_target = pd.Series([0.10, 0.20, 0.30], dtype=float)
+
+    assert forecast_historical_mean(train_target=train_target) == pytest.approx(0.20)
+
+
 def test_forecast_linear_features_returns_finite_value() -> None:
     """Fit a linear forecast on the train window and score one test row."""
     from volatility_regimes.walkforward.models import forecast_linear_features
@@ -52,6 +61,88 @@ def test_forecast_linear_features_returns_finite_value() -> None:
     )
 
     assert np.isfinite(forecast_value)
+
+
+def test_batch_forecasts_match_single_row_gmm_and_linear_results() -> None:
+    """Batch fitting should preserve the established row-level predictions."""
+    from volatility_regimes.walkforward.models import (
+        forecast_linear_features,
+        forecast_linear_features_batch,
+        forecast_regime_mean,
+        forecast_regime_mean_batch,
+    )
+
+    rng = np.random.default_rng(123)
+    train_features = pd.DataFrame(
+        {
+            "atm_iv_near": np.concatenate(
+                [
+                    rng.normal(0.15, 0.01, 60),
+                    rng.normal(0.30, 0.01, 60),
+                ]
+            ),
+            "term_slope": np.concatenate(
+                [
+                    rng.normal(0.02, 0.005, 60),
+                    rng.normal(-0.01, 0.005, 60),
+                ]
+            ),
+        }
+    )
+    train_target = pd.Series(
+        np.concatenate(
+            [
+                rng.normal(0.14, 0.01, 60),
+                rng.normal(0.28, 0.01, 60),
+            ]
+        ),
+        dtype=float,
+    )
+    test_features = pd.DataFrame(
+        {
+            "atm_iv_near": [0.16, 0.31],
+            "term_slope": [0.018, -0.012],
+        },
+        index=pd.bdate_range("2025-01-02", periods=2),
+    )
+
+    linear_batch = forecast_linear_features_batch(
+        train_features=train_features,
+        train_target=train_target,
+        test_features=test_features,
+    )
+    gmm_batch = forecast_regime_mean_batch(
+        train_features=train_features,
+        train_target=train_target,
+        test_features=test_features,
+        model_type="gmm",
+        min_k=2,
+        max_k=2,
+    )
+
+    for test_date, test_row in test_features.iterrows():
+        single_linear = forecast_linear_features(
+            train_features=train_features,
+            train_target=train_target,
+            test_row=test_row,
+        )
+        single_gmm = forecast_regime_mean(
+            train_features=train_features,
+            train_target=train_target,
+            test_row=test_row,
+            model_type="gmm",
+            min_k=2,
+            max_k=2,
+        )
+        assert linear_batch.loc[test_date] == pytest.approx(single_linear)
+        assert gmm_batch.loc[test_date, "prediction"] == pytest.approx(
+            single_gmm["prediction"]
+        )
+        assert int(gmm_batch.loc[test_date, "selected_k"]) == single_gmm["selected_k"]
+        assert (
+            int(gmm_batch.loc[test_date, "predicted_regime"])
+            == single_gmm["predicted_regime"]
+        )
 
 
 def test_forecast_trailing_realized_vol_uses_current_test_date() -> None:

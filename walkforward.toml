@@ -15,8 +15,9 @@ horizons = [20]
 # Feature subsets to compare.
 feature_sets = ["atm_term"]
 
-# Initial expanding-window history length in trading days.
-min_train_size = 3880
+# Minimum leakage-safe labelled training rows after the target embargo.
+# 2520 rows are approximately ten trading years at 252 days per year.
+min_train_size = 2520
 
 # Number of test rows advanced per split.
 step_size = 5

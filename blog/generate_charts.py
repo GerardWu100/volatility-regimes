@@ -2,8 +2,9 @@
 
 The script reads the tracked portable demo Parquet files, reconstructs the
 project's seven delta-space surface features, fits full-sample Gaussian mixture
-models for descriptive analysis, and writes reproducible CSV and PNG artifacts
-under ``blog/``. It does not run or modify the production research pipeline.
+models for descriptive analysis, freezes the completed production walk-forward
+outputs, and writes reproducible CSV and PNG artifacts under ``blog/``. Run the
+walk-forward CLI before this script.
 
 Outputs
 -------
@@ -12,13 +13,17 @@ blog/data/regime_summary.csv
 blog/data/model_selection.csv
     Bayesian information criterion values for candidate regime counts.
 blog/data/sample_audit.csv
-    Row counts explaining the default walk-forward configuration.
+    Row counts for the corrected default walk-forward configuration.
+blog/data/walkforward_metric_summary.csv
+    Frozen production metrics for the five default forecast models.
+blog/data/walkforward_forecast_panel.csv
+    Frozen row-level production forecasts used by the loss-path chart.
 blog/images/01_spx_regime_timeline.png
     SPX near-term ATM implied volatility with descriptive regime shading.
-blog/images/02_regime_profiles.png
-    Implied and forward realized volatility means by ordered regime.
-blog/images/03_atm_vs_forward_rv.png
-    Near-term ATM implied volatility against 20-day forward realized volatility.
+blog/images/02_oos_rmse.png
+    Out-of-sample root mean squared error by symbol and model.
+blog/images/03_cumulative_loss_difference.png
+    Cumulative GMM squared-error difference versus the historical mean.
 
 Notes
 -----
@@ -41,17 +46,20 @@ BLOG_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = BLOG_ROOT.parent
 DATA_DIR = BLOG_ROOT / "data"
 IMAGE_DIR = BLOG_ROOT / "images"
+WALKFORWARD_OUTPUT_DIR = PROJECT_ROOT / "outputs" / "reports" / "walkforward"
 SYMBOLS = ("SPX", "NDX")
 ANNUALIZATION_FACTOR = 252
 FORWARD_HORIZON = 20
 CANDIDATE_REGIME_COUNTS = tuple(range(2, 7))
 RANDOM_SEED = 42
 GMM_INITIALIZATIONS = 5
-DEFAULT_MIN_TRAIN_SIZE = 3_880
+DEFAULT_MIN_TRAIN_SIZE = 2_520
 REGIME_COLORS = ("#2a6fbb", "#22a7a7", "#e2b04a", "#dc6b45", "#a33e5c", "#6b3c8f")
 
 
-def _interpolate_wing(frame: pd.DataFrame, option_type: str, target_delta: float) -> pd.Series:
+def _interpolate_wing(
+    frame: pd.DataFrame, option_type: str, target_delta: float
+) -> pd.Series:
     """Interpolate implied volatility at a fixed delta for every date and expiry.
 
     Parameters
@@ -89,7 +97,9 @@ def _interpolate_wing(frame: pd.DataFrame, option_type: str, target_delta: float
         return pivot[lower_delta].astype(float)
 
     weight = (target_delta - lower_delta) / (upper_delta - lower_delta)
-    interpolated = pivot[lower_delta] + weight * (pivot[upper_delta] - pivot[lower_delta])
+    interpolated = pivot[lower_delta] + weight * (
+        pivot[upper_delta] - pivot[lower_delta]
+    )
     return interpolated.astype(float)
 
 
@@ -188,7 +198,9 @@ def fit_descriptive_regimes(features: pd.DataFrame) -> tuple[np.ndarray, pd.Data
         rows.append({"candidate_k": count, "bic": float(model.bic(standardized))})
 
     model_selection = pd.DataFrame(rows)
-    selected_k = int(model_selection.loc[model_selection["bic"].idxmin(), "candidate_k"])
+    selected_k = int(
+        model_selection.loc[model_selection["bic"].idxmin(), "candidate_k"]
+    )
     raw_labels = models[selected_k].predict(standardized)
     atm_column = int(features.columns.get_loc("atm_iv_near"))
     mean_atm = {
@@ -196,7 +208,9 @@ def fit_descriptive_regimes(features: pd.DataFrame) -> tuple[np.ndarray, pd.Data
         for label in np.unique(raw_labels)
     }
     mapping = {old: new for new, old in enumerate(sorted(mean_atm, key=mean_atm.get))}
-    ordered_labels = np.asarray([mapping[int(label)] for label in raw_labels], dtype=int)
+    ordered_labels = np.asarray(
+        [mapping[int(label)] for label in raw_labels], dtype=int
+    )
     model_selection["selected"] = model_selection["candidate_k"] == selected_k
     return ordered_labels, model_selection
 
@@ -279,13 +293,13 @@ def plot_spx_timeline(panel: pd.DataFrame, output_path: Path) -> None:
     plt.close(figure)
 
 
-def plot_regime_profiles(summary: pd.DataFrame, output_path: Path) -> None:
-    """Plot regime-level implied and forward realized volatility means.
+def plot_oos_rmse(metric_summary: pd.DataFrame, output_path: Path) -> None:
+    """Plot out-of-sample root mean squared error by model and symbol.
 
     Parameters
     ----------
-    summary : pandas.DataFrame
-        Combined SPX and NDX regime summary.
+    metric_summary : pandas.DataFrame
+        Production walk-forward metrics with one row per symbol and model.
     output_path : pathlib.Path
         Destination PNG path.
 
@@ -294,36 +308,64 @@ def plot_regime_profiles(summary: pd.DataFrame, output_path: Path) -> None:
     None
         The function writes one PNG file.
     """
-    figure, axes = plt.subplots(1, 2, figsize=(14, 5.5), constrained_layout=True, sharey=True)
+    model_order = (
+        "historical_mean",
+        "gmm_regime_mean",
+        "linear_features",
+        "trailing_realized_vol",
+        "atm_iv",
+    )
+    model_labels = (
+        "Historical\nmean",
+        "GMM regime\nmean",
+        "Linear\nfeatures",
+        "Trailing\nrealized vol",
+        "Current\nATM IV",
+    )
+    bar_colors = ("#34495e", "#2a6fbb", "#22a7a7", "#e2b04a", "#dc6b45")
+
+    figure, axes = plt.subplots(
+        1,
+        2,
+        figsize=(14, 5.5),
+        constrained_layout=True,
+        sharey=True,
+    )
     for axis, symbol in zip(axes, SYMBOLS, strict=True):
-        symbol_rows = summary.loc[summary["symbol"] == symbol]
-        x_values = symbol_rows["regime"].to_numpy(dtype=int)
-        axis.plot(x_values, 100.0 * symbol_rows["mean_atm_iv"], "o-", label="Near-term ATM IV")
-        axis.plot(
-            x_values,
-            100.0 * symbol_rows["mean_forward_realized_vol"],
-            "s-",
-            label="20-day forward realized vol",
-        )
-        axis.set_title(symbol)
-        axis.set_xlabel("Ordered descriptive regime (low to high ATM IV)")
-        axis.set_xticks(x_values)
-        axis.grid(alpha=0.2)
-    axes[0].set_ylabel("Annualized volatility (%)")
-    axes[1].legend(frameon=False)
-    figure.suptitle("Ordered regimes separate implied-volatility levels")
+        symbol_metrics = metric_summary.loc[
+            metric_summary["symbol"] == symbol
+        ].set_index("model_name")
+        rmse_percent = 100.0 * symbol_metrics.loc[list(model_order), "rmse"]
+        bars = axis.bar(model_labels, rmse_percent, color=bar_colors)
+        for bar, value in zip(bars, rmse_percent, strict=True):
+            axis.text(
+                bar.get_x() + bar.get_width() / 2.0,
+                bar.get_height() + 0.04,
+                f"{value:.2f}",
+                ha="center",
+                va="bottom",
+                fontsize=9,
+            )
+        axis.set_title(f"{symbol}: 20-day horizon")
+        axis.set_xlabel("Forecast model")
+        axis.grid(alpha=0.2, axis="y")
+    axes[0].set_ylabel("Out-of-sample RMSE (volatility percentage points)")
+    figure.suptitle("The historical mean is the lowest-RMSE forecast")
     figure.savefig(output_path, dpi=180)
     plt.close(figure)
 
 
-def plot_atm_vs_forward_rv(panels: dict[str, pd.DataFrame], output_path: Path) -> None:
-    """Plot implied volatility against the next 20 days of realized volatility.
+def plot_cumulative_loss_difference(
+    forecast_panel: pd.DataFrame,
+    output_path: Path,
+) -> None:
+    """Plot cumulative GMM squared-error loss minus historical-mean loss.
 
     Parameters
     ----------
-    panels : dict[str, pandas.DataFrame]
-        Per-symbol panels containing ``atm_iv_near``, ``forward_realized_vol``,
-        and ``regime``.
+    forecast_panel : pandas.DataFrame
+        Production row-level forecasts for all symbols and models. Volatility
+        values are annualized decimals.
     output_path : pathlib.Path
         Destination PNG path.
 
@@ -332,29 +374,36 @@ def plot_atm_vs_forward_rv(panels: dict[str, pd.DataFrame], output_path: Path) -
     None
         The function writes one PNG file.
     """
-    figure, axes = plt.subplots(1, 2, figsize=(14, 6), constrained_layout=True, sharex=True, sharey=True)
-    for axis, symbol in zip(axes, SYMBOLS, strict=True):
-        panel = panels[symbol].dropna(subset=["forward_realized_vol"])
-        for regime in sorted(panel["regime"].unique()):
-            mask = panel["regime"] == regime
-            axis.scatter(
-                100.0 * panel.loc[mask, "atm_iv_near"],
-                100.0 * panel.loc[mask, "forward_realized_vol"],
-                s=10,
-                alpha=0.45,
-                color=REGIME_COLORS[int(regime)],
-                label=f"Regime {int(regime)}",
-            )
-        minimum = 100.0 * min(panel["atm_iv_near"].min(), panel["forward_realized_vol"].min())
-        maximum = 100.0 * max(panel["atm_iv_near"].max(), panel["forward_realized_vol"].max())
-        axis.plot([minimum, maximum], [minimum, maximum], linestyle="--", color="#333333", linewidth=1)
-        correlation = panel["atm_iv_near"].corr(panel["forward_realized_vol"])
-        axis.set_title(f"{symbol} (correlation = {correlation:.2f})")
-        axis.set_xlabel("Near-term ATM implied volatility (%)")
-        axis.grid(alpha=0.2)
-    axes[0].set_ylabel("20-day forward realized volatility (%)")
-    axes[1].legend(ncol=2, frameon=False, fontsize=8)
-    figure.suptitle("Implied and forward realized volatility: related, not interchangeable")
+    figure, axis = plt.subplots(figsize=(14, 6), constrained_layout=True)
+    for symbol, color in zip(SYMBOLS, ("#2a6fbb", "#dc6b45"), strict=True):
+        symbol_panel = forecast_panel.loc[
+            (forecast_panel["symbol"] == symbol)
+            & forecast_panel["model_name"].isin(["gmm_regime_mean", "historical_mean"])
+        ]
+        predictions = symbol_panel.pivot(
+            index="date",
+            columns="model_name",
+            values="prediction",
+        )
+        actual = symbol_panel.groupby("date", sort=True)["actual"].first()
+        gmm_error_points = 100.0 * (actual - predictions["gmm_regime_mean"])
+        mean_error_points = 100.0 * (actual - predictions["historical_mean"])
+        cumulative_difference = (
+            gmm_error_points.pow(2) - mean_error_points.pow(2)
+        ).cumsum()
+        axis.plot(
+            cumulative_difference.index,
+            cumulative_difference,
+            color=color,
+            linewidth=1.5,
+            label=f"{symbol} (end = {cumulative_difference.iloc[-1]:.2f})",
+        )
+    axis.axhline(0.0, color="#333333", linewidth=1.0)
+    axis.set_title("Cumulative GMM loss minus historical-mean loss")
+    axis.set_xlabel("Forecast date")
+    axis.set_ylabel("Cumulative squared-error difference (percentage points²)")
+    axis.grid(alpha=0.2)
+    axis.legend(frameon=False)
     figure.savefig(output_path, dpi=180)
     plt.close(figure)
 
@@ -372,12 +421,15 @@ def main() -> None:
 
     summary_frames: list[pd.DataFrame] = []
     selection_frames: list[pd.DataFrame] = []
-    plot_panels: dict[str, pd.DataFrame] = {}
     audit_rows: list[dict[str, int | str]] = []
 
     for symbol in SYMBOLS:
-        options = pd.read_parquet(PROJECT_ROOT / "data" / "raw" / f"options_{symbol.lower()}.parquet")
-        prices = pd.read_parquet(PROJECT_ROOT / "data" / "raw" / f"prices_{symbol.lower()}.parquet")
+        options = pd.read_parquet(
+            PROJECT_ROOT / "data" / "raw" / f"options_{symbol.lower()}.parquet"
+        )
+        prices = pd.read_parquet(
+            PROJECT_ROOT / "data" / "raw" / f"prices_{symbol.lower()}.parquet"
+        )
         features = build_surface_features(options)
         forward_realized_volatility = build_forward_realized_volatility(prices)
         labels, model_selection = fit_descriptive_regimes(features)
@@ -391,16 +443,13 @@ def main() -> None:
         panel = features.loc[:, ["atm_iv_near"]].copy()
         panel["forward_realized_vol"] = forward_realized_volatility.reindex(panel.index)
         panel["regime"] = labels
-        plot_panels[symbol] = panel
-
-        complete_target_rows = int(panel.dropna(subset=["forward_realized_vol"]).shape[0])
-        close = prices.sort_values("date").set_index("date")["close"].astype(float)
-        trailing_realized_volatility = (
-            np.log(close / close.shift(1))
-            .rolling(FORWARD_HORIZON)
-            .std()
-            * np.sqrt(float(ANNUALIZATION_FACTOR))
+        complete_target_rows = int(
+            panel.dropna(subset=["forward_realized_vol"]).shape[0]
         )
+        close = prices.sort_values("date").set_index("date")["close"].astype(float)
+        trailing_realized_volatility = np.log(close / close.shift(1)).rolling(
+            FORWARD_HORIZON
+        ).std() * np.sqrt(float(ANNUALIZATION_FACTOR))
         fully_aligned_rows = int(
             panel.assign(
                 trailing_realized_vol=trailing_realized_volatility.reindex(panel.index)
@@ -408,7 +457,11 @@ def main() -> None:
             .dropna(subset=["forward_realized_vol", "trailing_realized_vol"])
             .shape[0]
         )
-        possible_test_rows = max(0, fully_aligned_rows - DEFAULT_MIN_TRAIN_SIZE)
+        expected_embargo_rows = FORWARD_HORIZON
+        possible_test_rows = max(
+            0,
+            fully_aligned_rows - DEFAULT_MIN_TRAIN_SIZE - expected_embargo_rows,
+        )
         audit_rows.append(
             {
                 "symbol": symbol,
@@ -416,7 +469,8 @@ def main() -> None:
                 "complete_20d_target_rows": complete_target_rows,
                 "fully_aligned_rows_with_trailing_rv": fully_aligned_rows,
                 "configured_min_train_size": DEFAULT_MIN_TRAIN_SIZE,
-                "configured_possible_test_rows": possible_test_rows,
+                "embargo_rows_before_first_test": expected_embargo_rows,
+                "configured_oos_rows": possible_test_rows,
             }
         )
 
@@ -427,15 +481,42 @@ def main() -> None:
     selection.to_csv(DATA_DIR / "model_selection.csv", index=False)
     audit.to_csv(DATA_DIR / "sample_audit.csv", index=False)
 
-    plot_spx_timeline(plot_panels["SPX"], IMAGE_DIR / "01_spx_regime_timeline.png")
-    plot_regime_profiles(summary, IMAGE_DIR / "02_regime_profiles.png")
-    plot_atm_vs_forward_rv(plot_panels, IMAGE_DIR / "03_atm_vs_forward_rv.png")
+    forecast_panel = pd.read_csv(
+        WALKFORWARD_OUTPUT_DIR / "forecast_panel.csv",
+        parse_dates=["date"],
+    )
+    metric_summary = pd.read_csv(WALKFORWARD_OUTPUT_DIR / "metric_summary.csv")
+    forecast_panel.to_csv(
+        DATA_DIR / "walkforward_forecast_panel.csv",
+        index=False,
+    )
+    metric_summary.to_csv(
+        DATA_DIR / "walkforward_metric_summary.csv",
+        index=False,
+    )
+
+    spx_options = pd.read_parquet(PROJECT_ROOT / "data" / "raw" / "options_spx.parquet")
+    spx_features = build_surface_features(spx_options)
+    spx_labels, _ = fit_descriptive_regimes(spx_features)
+    spx_panel = spx_features.loc[:, ["atm_iv_near"]].copy()
+    spx_panel["regime"] = spx_labels
+    plot_spx_timeline(
+        spx_panel,
+        IMAGE_DIR / "01_spx_regime_timeline.png",
+    )
+    plot_oos_rmse(metric_summary, IMAGE_DIR / "02_oos_rmse.png")
+    plot_cumulative_loss_difference(
+        forecast_panel,
+        IMAGE_DIR / "03_cumulative_loss_difference.png",
+    )
 
     print(summary.to_string(index=False))
     print("\nModel selection")
     print(selection.to_string(index=False))
     print("\nSample audit")
     print(audit.to_string(index=False))
+    print("\nWalk-forward metrics")
+    print(metric_summary.to_string(index=False))
 
 
 if __name__ == "__main__":

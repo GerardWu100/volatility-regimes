@@ -26,8 +26,8 @@ def summarize_metrics(forecast_panel: pd.DataFrame) -> pd.DataFrame:
     pd.DataFrame
         Metric summary with one row per symbol, horizon, feature set, and
         model. Columns include root mean squared error (RMSE), mean absolute
-        error (MAE), out-of-sample R-squared versus the ATM IV benchmark, and
-        forecast count.
+        error (MAE), out-of-sample R-squared versus the ATM IV and historical
+        mean benchmarks, and forecast count.
     """
     if forecast_panel.empty:
         return pd.DataFrame(
@@ -39,23 +39,27 @@ def summarize_metrics(forecast_panel: pd.DataFrame) -> pd.DataFrame:
                 "rmse",
                 "mae",
                 "oos_r_squared_vs_atm",
+                "oos_r_squared_vs_historical_mean",
                 "n_forecasts",
             ]
         )
 
-    # Precompute ATM benchmark MSE per (symbol, horizon, feature_set) group.
-    benchmark_mse_by_group: dict[tuple[object, object, object], float] = {}
-    benchmark_rows = forecast_panel.loc[forecast_panel["model_name"] == "atm_iv"]
-
-    for benchmark_key, benchmark_frame in benchmark_rows.groupby(
-        ["symbol", "horizon", "feature_set"],
-        sort=True,
-    ):
-        benchmark_actual = benchmark_frame["actual"].to_numpy(dtype=float)
-        benchmark_prediction = benchmark_frame["prediction"].to_numpy(dtype=float)
-        benchmark_residual = benchmark_actual - benchmark_prediction
-        benchmark_mse = float(np.mean(benchmark_residual**2))
-        benchmark_mse_by_group[benchmark_key] = benchmark_mse
+    benchmark_mse: dict[str, dict[tuple[object, object, object], float]] = {}
+    for benchmark_name in ("atm_iv", "historical_mean"):
+        benchmark_mse[benchmark_name] = {}
+        benchmark_rows = forecast_panel.loc[
+            forecast_panel["model_name"] == benchmark_name
+        ]
+        for benchmark_key, benchmark_frame in benchmark_rows.groupby(
+            ["symbol", "horizon", "feature_set"],
+            sort=True,
+        ):
+            benchmark_actual = benchmark_frame["actual"].to_numpy(dtype=float)
+            benchmark_prediction = benchmark_frame["prediction"].to_numpy(dtype=float)
+            benchmark_residual = benchmark_actual - benchmark_prediction
+            benchmark_mse[benchmark_name][benchmark_key] = float(
+                np.mean(benchmark_residual**2)
+            )
 
     summary_rows: list[dict[str, object]] = []
     group_columns = ["symbol", "horizon", "feature_set", "model_name"]
@@ -69,13 +73,15 @@ def summarize_metrics(forecast_panel: pd.DataFrame) -> pd.DataFrame:
         mae = float(np.mean(np.abs(residual)))
 
         atm_group_key = (group_key[0], group_key[1], group_key[2])
-        atm_benchmark_mse = benchmark_mse_by_group.get(atm_group_key)
-        if atm_benchmark_mse is None:
-            oos_r_squared_vs_atm = float(np.nan)
-        elif atm_benchmark_mse == 0.0:
-            oos_r_squared_vs_atm = 0.0
-        else:
-            oos_r_squared_vs_atm = 1.0 - mse / atm_benchmark_mse
+        relative_scores: dict[str, float] = {}
+        for benchmark_name in ("atm_iv", "historical_mean"):
+            group_benchmark_mse = benchmark_mse[benchmark_name].get(atm_group_key)
+            if group_benchmark_mse is None:
+                relative_scores[benchmark_name] = float(np.nan)
+            elif group_benchmark_mse == 0.0:
+                relative_scores[benchmark_name] = 0.0
+            else:
+                relative_scores[benchmark_name] = 1.0 - mse / group_benchmark_mse
 
         summary_rows.append(
             {
@@ -85,7 +91,8 @@ def summarize_metrics(forecast_panel: pd.DataFrame) -> pd.DataFrame:
                 "model_name": group_key[3],
                 "rmse": rmse,
                 "mae": mae,
-                "oos_r_squared_vs_atm": oos_r_squared_vs_atm,
+                "oos_r_squared_vs_atm": relative_scores["atm_iv"],
+                "oos_r_squared_vs_historical_mean": relative_scores["historical_mean"],
                 "n_forecasts": int(len(group_frame)),
             }
         )
@@ -136,6 +143,7 @@ def write_research_summary(
         "",
         "- Lower RMSE indicates better out-of-sample realized-volatility forecasts.",
         "- OOS R^2 is measured relative to the ATM IV benchmark within the same symbol, horizon, and feature set.",
-        "- Compare regime models against ATM IV and linear-feature baselines before interpreting incremental value.",
+        "- OOS R^2 versus the historical mean tests whether model structure adds value beyond the expanding unconditional target mean.",
+        "- Compare regime models against ATM IV, the historical mean, and linear-feature baselines before interpreting incremental value.",
     ]
     output_path.write_text("\n".join(lines), encoding="utf-8")

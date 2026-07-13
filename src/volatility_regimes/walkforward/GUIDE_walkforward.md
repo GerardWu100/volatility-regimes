@@ -18,12 +18,49 @@ The critical leakage control is the forward-target embargo. If the first test
 date is $s$, a training row dated $t$ is removed whenever its forward target
 uses returns that overlap the test window.
 
+Let $i(d)$ be the integer position of date $d$ in the sorted price history. A
+training label at $t$ is safe for a test window beginning at $s$ only when
+
+$$
+i(t)+h<i(s).
+$$
+
+`min_train_size` is checked after applying this inequality. The default value
+is 2,520 safe labels, approximately ten trading years. Early candidate splits
+are skipped until this count is available. Before fitting any model, the engine
+also computes the largest safe training set that could leave one test row. If
+that maximum is smaller than the requested minimum, the run raises a detailed
+configuration error rather than producing empty CSV files.
+
 Default forecast panel models:
 
 - `atm_iv`
+- `historical_mean`
 - `trailing_realized_vol`
 - `linear_features`
 - `gmm_regime_mean`
+
+The historical mean forecast is the expanding mean forward realized
+volatility in the embargoed training labels. It answers a necessary question:
+does a feature or regime model add information beyond the unconditional target
+level observed so far?
+
+All rows within one test block share one training window. Linear, GMM, and
+optional HMM models therefore fit once per block. GMM assigns the whole block
+under that train-only fit. For HMM forecasts, each date is still decoded as the
+last observation of the training sequence plus that single test row, so later
+test rows never enter an earlier date's state assignment.
+
+The metric summary reports root mean squared error, mean absolute error, and
+out-of-sample $R^2$ against two benchmarks. For model $m$ and benchmark $b$,
+
+$$
+R^2_{\mathrm{OOS},m\mid b}
+=1-\frac{\mathrm{MSE}_m}{\mathrm{MSE}_b},
+$$
+
+where $\mathrm{MSE}$ is mean squared error on identical forecast dates. A
+positive value improves on the benchmark. A negative value is worse.
 
 Optional robustness rows can be enabled with fixed `K` and HMM settings in
 `walkforward.toml`.
@@ -51,3 +88,6 @@ Where to start:
 - 2026-05-20: Moved experiment config to root `walkforward.toml` and split
   walk-forward artifacts into `outputs/reports/walkforward/` and
   `outputs/figures/walkforward/`.
+- 2026-07-13: Corrected the minimum-window contract to count post-embargo
+  labels, added capacity validation and the historical-mean benchmark, and
+  batched fits across each fixed-training test block.

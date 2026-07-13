@@ -7,7 +7,6 @@ subsets, and forecast horizons.
 
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
 import tomllib
 from typing import Callable
@@ -19,8 +18,9 @@ from volatility_regimes.data_access.loader import load_daily_prices, load_option
 from volatility_regimes.features.surface import extract_features, select_feature_columns
 from volatility_regimes.walkforward.models import (
     forecast_atm_iv,
-    forecast_linear_features,
-    forecast_regime_mean,
+    forecast_historical_mean,
+    forecast_linear_features_batch,
+    forecast_regime_mean_batch,
     forecast_trailing_realized_vol,
 )
 from volatility_regimes.walkforward.reporting import (
@@ -289,35 +289,38 @@ def _apply_forward_target_embargo(
     return safe_train_index
 
 
-def _build_hmm_forecast_kwargs(
-    hmm_n_iter: int,
-    hmm_random_restarts: int,
-) -> dict[str, object]:
-    """Build optional HMM kwargs accepted by the forecast helper.
+def _maximum_safe_train_size(
+    evaluation_index: pd.DatetimeIndex,
+    horizon: int,
+    price_date_positions: dict[pd.Timestamp, int],
+) -> int:
+    """Return the largest embargoed train set that leaves one test row.
 
     Parameters
     ----------
-    hmm_n_iter : int
-        Maximum expectation-maximization iterations for HMM fitting.
-    hmm_random_restarts : int
-        Number of random HMM restarts.
+    evaluation_index : pd.DatetimeIndex
+        Fully aligned dates available to every forecast model.
+    horizon : int
+        Forward realized-volatility horizon in trading days.
+    price_date_positions : dict[pd.Timestamp, int]
+        Chronological price-date positions used by the embargo.
 
     Returns
     -------
-    dict[str, object]
-        Keyword arguments that can be passed to `forecast_regime_mean`
-        without breaking tests that monkeypatch a simplified helper.
+    int
+        Maximum number of leakage-safe labelled training rows. Returns zero
+        when fewer than two aligned rows are available.
     """
-    forecast_parameters = inspect.signature(forecast_regime_mean).parameters
-    hmm_forecast_kwargs: dict[str, object] = {}
+    if len(evaluation_index) < 2:
+        return 0
 
-    # Some tests monkeypatch `forecast_regime_mean` with a shorter signature,
-    # so add HMM kwargs only when the active function supports them.
-    if "hmm_n_iter" in forecast_parameters:
-        hmm_forecast_kwargs["hmm_n_iter"] = hmm_n_iter
-    if "hmm_random_restarts" in forecast_parameters:
-        hmm_forecast_kwargs["hmm_random_restarts"] = hmm_random_restarts
-    return hmm_forecast_kwargs
+    safe_index = _apply_forward_target_embargo(
+        train_index=evaluation_index[:-1],
+        test_index=evaluation_index[-1:],
+        horizon=horizon,
+        price_date_positions=price_date_positions,
+    )
+    return int(len(safe_index))
 
 
 def _append_forecast_row(
@@ -427,28 +430,30 @@ def _build_forecast_row(
     }
 
 
-def _forecast_hmm_safely(
+def _forecast_hmm_batch_safely(
     train_features: pd.DataFrame,
     train_target: pd.Series,
-    test_row: pd.Series,
+    test_features: pd.DataFrame,
     regime_min_k: int,
     regime_max_k: int,
-    hmm_forecast_kwargs: dict[str, object],
-) -> dict[str, object] | None:
-    """Return HMM regime-mean forecast, or None when fitting fails.
+    hmm_n_iter: int,
+    hmm_random_restarts: int,
+) -> pd.DataFrame | None:
+    """Return HMM forecasts for one test block, or None when fitting fails.
 
     Small synthetic windows can fail to fit HMM models for some `K` values,
-    so the walk-forward run should skip only the failed row and continue.
+    so the walk-forward run skips only the failed block and continues.
     """
     try:
-        return forecast_regime_mean(
+        return forecast_regime_mean_batch(
             train_features=train_features,
             train_target=train_target,
-            test_row=test_row,
+            test_features=test_features,
             model_type="hmm",
             min_k=regime_min_k,
             max_k=regime_max_k,
-            **hmm_forecast_kwargs,
+            hmm_n_iter=hmm_n_iter,
+            hmm_random_restarts=hmm_random_restarts,
         )
     except RuntimeError:
         return None
@@ -482,7 +487,7 @@ def run_research(
     horizons : list[int]
         Forward forecast horizons in trading days.
     min_train_size : int
-        Minimum expanding-window train length before the first forecast.
+        Minimum leakage-safe labelled train length after the target embargo.
     step_size : int
         Number of rows forecasted in each walk-forward step.
     annualization : int
@@ -513,11 +518,6 @@ def run_research(
 
     robustness_k_values = list(fixed_k_values or [])
     include_robustness_models = fixed_k_values is not None
-    hmm_forecast_kwargs = _build_hmm_forecast_kwargs(
-        hmm_n_iter=hmm_n_iter,
-        hmm_random_restarts=hmm_random_restarts,
-    )
-
     forecast_rows: list[dict[str, object]] = []
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -550,13 +550,23 @@ def run_research(
                 combined["trailing_realized_vol"] = trailing_realized_volatility
                 combined = combined.dropna()
 
-                if combined.empty:
-                    continue
-                if len(combined) <= min_train_size:
-                    continue
+                evaluation_index = pd.DatetimeIndex(combined.index)
+                maximum_safe_train_size = _maximum_safe_train_size(
+                    evaluation_index=evaluation_index,
+                    horizon=horizon,
+                    price_date_positions=price_date_positions,
+                )
+                if maximum_safe_train_size < min_train_size:
+                    raise ValueError(
+                        "Walk-forward configuration cannot produce a forecast: "
+                        f"symbol={symbol}, horizon={horizon}, "
+                        f"feature_set={feature_set}, aligned_rows={len(combined)}, "
+                        f"maximum_safe_train_rows={maximum_safe_train_size}, "
+                        f"requested_min_train_size={min_train_size}."
+                    )
 
                 splits = build_expanding_window_splits(
-                    dates=pd.DatetimeIndex(combined.index),
+                    dates=evaluation_index,
                     min_train_size=min_train_size,
                     step_size=step_size,
                 )
@@ -568,7 +578,10 @@ def run_research(
                         horizon=horizon,
                         price_date_positions=price_date_positions,
                     )
-                    if len(embargoed_train_index) == 0:
+                    # `min_train_size` describes labels that remain usable
+                    # after the forward-target embargo, not the candidate
+                    # rows presented to the split builder.
+                    if len(embargoed_train_index) < min_train_size:
                         continue
 
                     train_features = combined.loc[
@@ -589,6 +602,55 @@ def run_research(
                         "trailing_realized_vol",
                     ]
 
+                    linear_predictions = forecast_linear_features_batch(
+                        train_features=train_features,
+                        train_target=train_target,
+                        test_features=test_features,
+                    )
+                    gmm_results = forecast_regime_mean_batch(
+                        train_features=train_features,
+                        train_target=train_target,
+                        test_features=test_features,
+                        model_type="gmm",
+                        min_k=regime_min_k,
+                        max_k=regime_max_k,
+                    )
+                    historical_mean_prediction = forecast_historical_mean(
+                        train_target=train_target
+                    )
+
+                    hmm_results: pd.DataFrame | None = None
+                    fixed_gmm_results: dict[int, pd.DataFrame] = {}
+                    fixed_hmm_results: dict[int, pd.DataFrame | None] = {}
+                    if include_robustness_models:
+                        hmm_results = _forecast_hmm_batch_safely(
+                            train_features=train_features,
+                            train_target=train_target,
+                            test_features=test_features,
+                            regime_min_k=regime_min_k,
+                            regime_max_k=regime_max_k,
+                            hmm_n_iter=hmm_n_iter,
+                            hmm_random_restarts=hmm_random_restarts,
+                        )
+                        for fixed_k in robustness_k_values:
+                            fixed_gmm_results[fixed_k] = forecast_regime_mean_batch(
+                                train_features=train_features,
+                                train_target=train_target,
+                                test_features=test_features,
+                                model_type="gmm",
+                                min_k=int(fixed_k),
+                                max_k=int(fixed_k),
+                            )
+                            fixed_hmm_results[fixed_k] = _forecast_hmm_batch_safely(
+                                train_features=train_features,
+                                train_target=train_target,
+                                test_features=test_features,
+                                regime_min_k=int(fixed_k),
+                                regime_max_k=int(fixed_k),
+                                hmm_n_iter=hmm_n_iter,
+                                hmm_random_restarts=hmm_random_restarts,
+                            )
+
                     for test_date, test_row in test_features.iterrows():
                         actual_value = float(test_target.loc[test_date])
                         atm_prediction = forecast_atm_iv(test_row=test_row)
@@ -596,19 +658,8 @@ def run_research(
                             trailing_realized_vol=test_trailing_realized_vol,
                             test_date=test_date,
                         )
-                        linear_prediction = forecast_linear_features(
-                            train_features=train_features,
-                            train_target=train_target,
-                            test_row=test_row,
-                        )
-                        gmm_result = forecast_regime_mean(
-                            train_features=train_features,
-                            train_target=train_target,
-                            test_row=test_row,
-                            model_type="gmm",
-                            min_k=regime_min_k,
-                            max_k=regime_max_k,
-                        )
+                        linear_prediction = float(linear_predictions.loc[test_date])
+                        gmm_result = gmm_results.loc[test_date].to_dict()
 
                         # Always write the original Task 4 baselines first.
                         _append_forecast_row(
@@ -619,6 +670,16 @@ def run_research(
                             forecast_date=test_date,
                             model_name="atm_iv",
                             prediction=atm_prediction,
+                            actual=actual_value,
+                        )
+                        _append_forecast_row(
+                            forecast_rows,
+                            symbol=symbol,
+                            feature_set=feature_set,
+                            horizon=horizon,
+                            forecast_date=test_date,
+                            model_name="historical_mean",
+                            prediction=historical_mean_prediction,
                             actual=actual_value,
                         )
                         _append_forecast_row(
@@ -653,16 +714,7 @@ def run_research(
                         )
 
                         if include_robustness_models:
-                            hmm_result = _forecast_hmm_safely(
-                                train_features=train_features,
-                                train_target=train_target,
-                                test_row=test_row,
-                                regime_min_k=regime_min_k,
-                                regime_max_k=regime_max_k,
-                                hmm_forecast_kwargs=hmm_forecast_kwargs,
-                            )
-
-                            if hmm_result is not None:
+                            if hmm_results is not None:
                                 _append_regime_mean_row(
                                     forecast_rows,
                                     symbol=symbol,
@@ -670,21 +722,13 @@ def run_research(
                                     horizon=horizon,
                                     forecast_date=test_date,
                                     model_name="hmm_regime_mean",
-                                    regime_result=hmm_result,
+                                    regime_result=hmm_results.loc[test_date].to_dict(),
                                     actual=actual_value,
                                 )
 
                             # Run fixed-K sweeps after the baseline models so the
                             # original Task 4 row set remains present.
                             for fixed_k in robustness_k_values:
-                                fixed_gmm_result = forecast_regime_mean(
-                                    train_features=train_features,
-                                    train_target=train_target,
-                                    test_row=test_row,
-                                    model_type="gmm",
-                                    min_k=int(fixed_k),
-                                    max_k=int(fixed_k),
-                                )
                                 _append_regime_mean_row(
                                     forecast_rows,
                                     symbol=symbol,
@@ -692,18 +736,13 @@ def run_research(
                                     horizon=horizon,
                                     forecast_date=test_date,
                                     model_name=f"gmm_regime_mean_k_{int(fixed_k)}",
-                                    regime_result=fixed_gmm_result,
+                                    regime_result=fixed_gmm_results[fixed_k]
+                                    .loc[test_date]
+                                    .to_dict(),
                                     actual=actual_value,
                                 )
 
-                                fixed_hmm_result = _forecast_hmm_safely(
-                                    train_features=train_features,
-                                    train_target=train_target,
-                                    test_row=test_row,
-                                    regime_min_k=int(fixed_k),
-                                    regime_max_k=int(fixed_k),
-                                    hmm_forecast_kwargs=hmm_forecast_kwargs,
-                                )
+                                fixed_hmm_result = fixed_hmm_results[fixed_k]
 
                                 if fixed_hmm_result is None:
                                     continue
@@ -715,9 +754,16 @@ def run_research(
                                     horizon=horizon,
                                     forecast_date=test_date,
                                     model_name=f"hmm_regime_mean_k_{int(fixed_k)}",
-                                    regime_result=fixed_hmm_result,
+                                    regime_result=fixed_hmm_result.loc[
+                                        test_date
+                                    ].to_dict(),
                                     actual=actual_value,
                                 )
+
+    if not forecast_rows:
+        raise RuntimeError(
+            "Walk-forward run produced no forecast rows after validation."
+        )
 
     forecast_panel = pd.DataFrame(forecast_rows)
     metric_summary = summarize_metrics(forecast_panel=forecast_panel)

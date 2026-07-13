@@ -18,6 +18,13 @@ Tests are split by scope:
 
 For the walk-forward package, the core invariant is temporal causality. The split builders must keep the training window strictly before the test window, and the CLI runner must additionally embargo any training label whose forward return window would overlap the test horizon. Without that second rule, the forecast target would leak future returns even if the split itself looks correct.
 
+The configured minimum training size applies after the embargo. Integration
+tests check that early splits are skipped until enough safe labels remain and
+that an impossible request raises a capacity error before empty artifacts are
+written. Batch-model tests compare block predictions with the corresponding
+single-row functions, protecting the performance optimization from changing
+forecast values or HMM information sets.
+
 Model tests focus on forecast behavior instead of implementation internals.
 For example, HMM tests verify that forecast decoding uses the full
 train-plus-test sequence.
@@ -62,3 +69,6 @@ Where to start:
   package and `data/raw/` offline data path.
 - 2026-05-20: Split tests into `unit/` and `integration/` to match the standard
   repository layout.
+- 2026-07-13: Added post-embargo capacity, fail-fast, historical-mean, and
+  batch-equivalence coverage after the original demo configuration produced no
+  forecast rows.

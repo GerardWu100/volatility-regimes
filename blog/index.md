@@ -12,7 +12,7 @@ An option surface rarely moves as one number. At-the-money implied volatility ca
 
 This project asks a narrower question: if I compress the daily SPX and NDX option surfaces into a small feature vector, can latent states improve forecasts of the next 20 trading days of realized volatility?
 
-The code has two parts. A descriptive pipeline finds states in the complete sample. A walk-forward pipeline refits on past data, predicts one block at a time, and compares a regime forecast with current at-the-money implied volatility, trailing realized volatility, and linear regression. Keeping those parts separate matters. A clean cluster plot is evidence that the surface has structure. It is not evidence that the structure forecasts anything.
+The code has two parts. A descriptive pipeline finds states in the complete sample. A walk-forward pipeline refits on past data, predicts one block at a time, and compares a regime forecast with current at-the-money implied volatility, the expanding historical mean, trailing realized volatility, and linear regression. Keeping those parts separate matters. A clean cluster plot is evidence that the surface has structure. It is not evidence that the structure forecasts anything.
 
 The repository ships portable demo data for 3,912 trading days from 2010-01-04 through 2024-12-31. The results below describe that tracked sample. They should not be read as a production study based on independently sourced vendor history.
 
@@ -47,7 +47,7 @@ term_slope = atm_iv_mid - atm_iv_near
 
 ## What the latent state model does
 
-Each feature column is standardized using its sample mean and standard deviation. Let $x_t$ be the resulting seven-dimensional feature vector. A Gaussian mixture model with $K$ components assigns density
+Each feature column is standardized using its mean and standard deviation. The descriptive chart uses full-sample estimates. Every walk-forward fit estimates the scale from its training window only. Let $x_t$ be the resulting $d$-dimensional feature vector. The full descriptive model has $d=7$, while the default forecast uses $d=3$: near ATM, mid ATM, and their term slope. A Gaussian Mixture Model (GMM) with $K$ components assigns density
 
 $$
 p(x_t)=\sum_{k=1}^{K}\pi_k\,\mathcal{N}(x_t\mid\mu_k,\Sigma_k),
@@ -61,7 +61,13 @@ $$
 \mathrm{BIC}_K=-2\ell_K+p_K\log n,
 $$
 
-where $\ell_K$ is the fitted log-likelihood, $p_K$ is the number of estimated parameters, and $n$ is the number of daily observations. The penalty prevents likelihood from rewarding extra states without limit.
+where $\ell_K$ is the fitted log-likelihood, $p_K$ is the number of estimated parameters, and $n$ is the number of daily observations. With full covariance matrices in $d$ dimensions, the parameter count is
+
+$$
+p_K=(K-1)+Kd+K\frac{d(d+1)}{2}.
+$$
+
+The three terms count independent mixture weights, component means, and unique covariance entries. The penalty prevents likelihood from rewarding extra states without limit. The descriptive pipeline considers $K=2,\ldots,6$. The walk-forward configuration considers $K\in\{2,3\}$ inside each training window.
 
 Mixture labels have no natural order, so the project sorts them by mean near-term ATM implied volatility. Regime 0 is the lowest implied-volatility state. Larger labels indicate successively higher average ATM implied volatility. The ordering improves interpretation, but it does not turn an unsupervised cluster into a risk forecast.
 
@@ -129,43 +135,76 @@ for train_date in train_index:
 
 This detail does more for credibility than another state model. Without it, an expanding window looks causal while its labels quietly cross the boundary.
 
-## What the portable sample says
+## Fixing an experiment that could not start
 
-I regenerated the descriptive analysis from the tracked Parquet files with `blog/generate_charts.py`. The script applies the same seven feature definitions, standardization, full-covariance Gaussian mixtures, five initializations, random seed 42, and BIC selection used by the package.
+The original default requested 3,880 training rows. Each symbol has 3,912 complete feature rows. The 20-day forward target removes the last 20 rows, and the trailing realized-volatility benchmark needs 20 past returns at the beginning. The common evaluation panel therefore contains 3,872 rows, fewer than the requested training window even before the embargo.
 
-| Symbol | Selected K | Lowest-regime ATM IV | Highest-regime ATM IV | Lowest-regime forward RV | Highest-regime forward RV |
-|:--|--:|--:|--:|--:|--:|
-| SPX | 5 | 10.01% | 19.96% | 15.25% | 14.65% |
-| NDX | 3 | 11.47% | 20.26% | 15.07% | 14.83% |
+Silent empty CSV files were the wrong behavior. The corrected contract defines `min_train_size` as the number of labelled rows left after embargo. Its new value is 2,520, approximately ten trading years. Early candidate splits are skipped until 2,520 safe labels exist. A preflight also computes the maximum safe history that can leave one test row. An impossible request now raises an error with the aligned count, safe maximum, and requested minimum.
 
-![Mean implied and forward realized volatility by ordered descriptive regime](images/02_regime_profiles.png)
+All five dates in a test block share one fixed training window. The linear and GMM models now fit once for that block, then score all five rows. This removes redundant fitting without changing the information set or predictions. The first valid forecast is 2019-10-28. The final one is 2024-12-03 because the remaining December dates do not yet have a complete 20-day future target.
 
-The blue lines rise by construction: regimes are ordered on near-term ATM implied volatility. The orange lines do not. Mean 20-day forward realized volatility stays near 15 percent across the states in this demo sample. For SPX it is slightly lower in the highest state than in the lowest. NDX is nearly flat.
+## Measuring forecast loss
 
-The variance risk premium in this project is the difference between ATM implied volatility and forward realized volatility. In the lowest SPX state, its sample mean is −5.24 percentage points. In the highest state, it is +5.31 percentage points. Most of that swing comes from implied volatility, not from a matching change in subsequent realized volatility.
-
-![Near-term ATM implied volatility versus 20-day forward realized volatility](images/03_atm_vs_forward_rv.png)
-
-The scatter tells the same story without aggregation. The sample correlation between current near-term ATM implied volatility and 20-day forward realized volatility is −0.05 for SPX and −0.04 for NDX. These values are properties of the portable demo data, not estimates I would carry into trading or risk limits. They do show why a regime chart cannot answer the forecast question on its own.
-
-## Why there is no out-of-sample victory table
-
-The default configuration requests a 3,880-row initial training window. Each symbol has 3,912 complete feature rows. The 20-day forward target removes the last 20 rows, and the trailing-realized-volatility benchmark requires a 20-day history at the beginning. After both alignments, 3,872 rows remain. That is fewer than the minimum training size, so the configured walk-forward run correctly writes an empty forecast panel.
-
-Changing the threshold after seeing this would manufacture a result for the article. I left the research configuration untouched.
-
-When forecasts exist, the reporting layer calculates root mean squared error (RMSE), mean absolute error (MAE), and an out-of-sample score relative to the ATM implied-volatility benchmark. Let $\mathrm{MSE}_{m}$ be model $m$'s mean squared error and $\mathrm{MSE}_{\mathrm{ATM}}$ the benchmark error on the same dates. The relative score is
+Let $y_t$ be realized volatility and $\hat y_{m,t}$ be model $m$'s forecast on date $t$. For $N$ forecast dates, define the error $e_{m,t}=y_t-\hat y_{m,t}$. Mean squared error (MSE), root mean squared error (RMSE), and mean absolute error (MAE) are
 
 $$
-R^2_{\mathrm{OOS},m}=1-\frac{\mathrm{MSE}_{m}}{\mathrm{MSE}_{\mathrm{ATM}}}.
+\begin{aligned}
+\mathrm{MSE}_m &= \frac{1}{N}\sum_{t=1}^{N}e_{m,t}^2, \\
+\mathrm{RMSE}_m &= \sqrt{\mathrm{MSE}_m}, \\
+\mathrm{MAE}_m &= \frac{1}{N}\sum_{t=1}^{N}|e_{m,t}|.
+\end{aligned}
 $$
 
-A positive value means model $m$ reduces squared error versus current ATM implied volatility. Zero means a tie. A negative value means the supposedly richer model is worse.
+RMSE and MAE have the same annualized decimal unit as the target. The chart multiplies them by 100, so 0.024924 becomes 2.4924 volatility percentage points.
 
-## The experiment I would run next
+For benchmark $b$, the relative out-of-sample score is
 
-The next run needs enough untouched observations to judge the models. I would set the initial window before looking at errors, keep the 20-day embargo, and report results by contiguous time block rather than only as one pooled score. A regime method that wins only in one smooth portion of the portable series is not dependable evidence.
+$$
+R^2_{\mathrm{OOS},m\mid b}=1-\frac{\mathrm{MSE}_m}{\mathrm{MSE}_b}.
+$$
 
-I would also compare feature sets already registered in the package: ATM only, ATM plus term structure, ATM plus skew, the near-expiry smile, and the full seven-feature vector. That comparison asks whether surface shape adds information beyond the volatility level that defines the state ordering.
+A positive value means model $m$ has lower squared error than benchmark $b$ on identical dates. The report calculates this score against current ATM implied volatility and against the expanding historical mean. The second comparison is the harder one: it asks whether the model adds information beyond the unconditional target level observed so far.
 
-The project gets the research order right. Extract the surface, find interpretable states, define a future target, remove overlapping labels, and then compare against simple forecasts. The current tracked sample supports the first two steps and exercises the machinery for the others. It does not yet support the claim that latent volatility regimes improve realized-volatility forecasts.
+## The corrected result
+
+The default run produces 1,332 forecasts per symbol at a 20-day horizon. Each training window selects $K$ by BIC from $\{2,3\}$. SPX uses two states on 1,022 forecast dates and three on 310. NDX uses two on 1,012 dates and three on 320.
+
+| Symbol | Model | RMSE (pp) | MAE (pp) | $R^2_{\mathrm{OOS}}$ vs historical mean |
+|:--|:--|--:|--:|--:|
+| SPX | Historical mean | 2.4924 | 2.0243 | 0.0000 |
+| SPX | GMM regime mean | 2.4932 | 2.0305 | -0.0007 |
+| SPX | Linear features | 2.4999 | 2.0342 | -0.0061 |
+| SPX | Trailing realized volatility | 3.6150 | 2.8981 | -1.1038 |
+| SPX | Current ATM IV | 4.7103 | 3.9488 | -2.5717 |
+| NDX | Historical mean | 2.5297 | 2.0374 | 0.0000 |
+| NDX | GMM regime mean | 2.5442 | 2.0491 | -0.0115 |
+| NDX | Linear features | 2.5355 | 2.0336 | -0.0046 |
+| NDX | Trailing realized volatility | 3.8561 | 3.0798 | -1.3235 |
+| NDX | Current ATM IV | 5.2400 | 4.3312 | -3.2907 |
+
+![Out-of-sample RMSE for five realized-volatility forecasts](images/02_oos_rmse.png)
+
+The regime mean cuts RMSE sharply relative to current ATM implied volatility, but the expanding historical mean is marginally better for both symbols. SPX differs by 0.0008 percentage points of RMSE. The NDX gap is 0.0145 percentage points. Linear regression is also close. In this sample, surface structure does not improve the pooled squared-error forecast beyond a slowly updated unconditional mean.
+
+That comparison also changes how I read the ATM result. Implied volatility is a risk-neutral price with a variance-risk premium, while realized volatility is a physical outcome. The near option bucket targets roughly 30 calendar days and the forecast target covers 20 trading days. A large ATM error does not prove an exploitable mispricing, and beating ATM does not isolate regime information.
+
+![Cumulative GMM squared-error loss minus historical-mean loss](images/03_cumulative_loss_difference.png)
+
+The cumulative loss difference uses squared errors in percentage-point units. A falling line favours GMM. A rising line favours the historical mean. SPX gains substantially during part of 2020 and 2021, then gives the advantage back and ends at +5.68 squared percentage points. NDX ends at +98.01. The path is unstable even where the final SPX difference is tiny.
+
+## What the result does and does not establish
+
+The central hypothesis fails on the portable demo sample under this configuration. GMM regimes describe the option surface cleanly, yet their conditional target means do not beat the expanding historical mean from 2019-10-28 through 2024-12-03.
+
+The conclusion is narrow for four reasons. First, the tracked Parquet files are teaching data, not independently verified vendor history. Second, the run tests one 20-day horizon and the three-column `atm_term` feature set. Third, adjacent targets share 19 of 20 returns, so 1,332 daily errors are not 1,332 independent observations. The report gives point estimates and no overlap-adjusted inference. Fourth, BIC state selection and model parameters are re-estimated every five dates. This is computationally costly, and the result may depend on the refit schedule.
+
+A production study should freeze the design before inspecting losses, test the registered feature sets and several horizons, and report non-overlapping block results or heteroskedasticity-and-autocorrelation-consistent uncertainty. It should also check calibration on real option quotes, including quote quality, delta conventions, expiry interpolation, and the distinction between implied and physical volatility.
+
+## Primary references
+
+- Dempster, Laird, and Rubin (1977), [“Maximum Likelihood from Incomplete Data via the EM Algorithm”](https://doi.org/10.1111/j.2517-6161.1977.tb01600.x), for expectation-maximization estimation.
+- Schwarz (1978), [“Estimating the Dimension of a Model”](https://doi.org/10.1214/aos/1176344136), for the Bayesian information criterion.
+- Andersen, Bollerslev, Diebold, and Labys (2003), [“Modeling and Forecasting Realized Volatility”](https://doi.org/10.1111/1468-0262.00418), for realized-volatility measurement and forecasting.
+- Campbell and Thompson (2008), [“Predicting Excess Stock Returns Out of Sample: Can Anything Beat the Historical Average?”](https://doi.org/10.1093/rfs/hhm055), for the historical-average benchmark and relative out-of-sample $R^2$ framing.
+
+The useful finding is the failed comparison. Once the unconditional mean enters the panel, the apparent regime advantage disappears.

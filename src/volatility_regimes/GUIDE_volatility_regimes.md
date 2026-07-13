@@ -30,7 +30,8 @@ The dependency direction is intentionally simple:
 - `descriptive/analytics.py`: realized-vol, VRP, transition, and regression outputs.
 - `descriptive/plotting.py`: PNG chart writers under `outputs/figures/descriptive/`.
 - `walkforward/engine.py`: out-of-sample runner and CSV/Markdown exports.
-- `walkforward/models.py`: benchmark and regime-mean forecast helpers.
+- `walkforward/models.py`: single-row and block forecast helpers for ATM,
+  historical mean, trailing realized volatility, linear, GMM, and HMM models.
 - `walkforward/splits.py`: split constructors.
 - `walkforward/targets.py`: forward target construction.
 - `walkforward/reporting.py`: metric aggregation and summary writer.
@@ -49,3 +50,5 @@ Where to start:
   orchestration code into importable pipelines with thin CLI adapters.
 - 2026-05-20: Centralized path constants in `project_paths.py` and aligned
   outputs with `outputs/reports/` and `outputs/figures/`.
+- 2026-07-13: Walk-forward models now fit once per fixed-training test block,
+  and the benchmark set includes the expanding historical target mean.

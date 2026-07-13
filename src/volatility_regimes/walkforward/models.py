@@ -57,6 +57,28 @@ def forecast_atm_iv(test_row: pd.Series) -> float:
     return forecast_value
 
 
+def forecast_historical_mean(train_target: pd.Series) -> float:
+    """Forecast with the expanding-window mean realized volatility.
+
+    Parameters
+    ----------
+    train_target : pd.Series
+        Leakage-safe training realized-volatility target in annualized decimal
+        units.
+
+    Returns
+    -------
+    float
+        Arithmetic mean of the available training targets.
+
+    Notes
+    -----
+    This benchmark tests whether surface features or regime assignments add
+    information beyond the unconditional volatility level observed so far.
+    """
+    return float(train_target.mean())
+
+
 def forecast_linear_features(
     train_features: pd.DataFrame,
     train_target: pd.Series,
@@ -78,15 +100,48 @@ def forecast_linear_features(
     float
         Linear regression forecast for the current test row.
     """
-    model = LinearRegression()
-
-    # Fit only on the train window to avoid any lookahead leakage.
-    model.fit(train_features, train_target)
-
     test_feature_frame = test_row.reindex(train_features.columns).to_frame().T
-    forecast_array = model.predict(test_feature_frame)
-    forecast_value = float(forecast_array[0])
+    forecast_series = forecast_linear_features_batch(
+        train_features=train_features,
+        train_target=train_target,
+        test_features=test_feature_frame,
+    )
+    forecast_value = float(forecast_series.iloc[0])
     return forecast_value
+
+
+def forecast_linear_features_batch(
+    train_features: pd.DataFrame,
+    train_target: pd.Series,
+    test_features: pd.DataFrame,
+) -> pd.Series:
+    """Fit one linear model and predict a complete walk-forward test block.
+
+    Parameters
+    ----------
+    train_features : pd.DataFrame
+        Leakage-safe training feature matrix.
+    train_target : pd.Series
+        Training target aligned to ``train_features``.
+    test_features : pd.DataFrame
+        Test-block features with the same columns as ``train_features``.
+
+    Returns
+    -------
+    pd.Series
+        One prediction per test row, preserving ``test_features.index``.
+
+    Notes
+    -----
+    A walk-forward split has one fixed training window. Fitting once per block
+    gives the same linear predictions as refitting for every row while avoiding
+    redundant work.
+    """
+    model = LinearRegression()
+    model.fit(train_features, train_target)
+    ordered_test_features = test_features.reindex(columns=train_features.columns)
+    predictions = model.predict(ordered_test_features)
+    return pd.Series(predictions, index=test_features.index, dtype=float)
 
 
 def forecast_trailing_realized_vol(
@@ -280,26 +335,96 @@ def forecast_regime_mean(
     train-plus-test sequence, not as an isolated row. This preserves the
     transition-aware state assignment verified by the HMM forecast-path tests.
     """
-    # Standardize from train data only, then transform the test row with the
-    # same scaler so all models run on one consistent feature scale.
+    test_feature_frame = test_row.reindex(train_features.columns).to_frame().T
+    batch_result = forecast_regime_mean_batch(
+        train_features=train_features,
+        train_target=train_target,
+        test_features=test_feature_frame,
+        model_type=model_type,
+        min_k=min_k,
+        max_k=max_k,
+        hmm_n_iter=hmm_n_iter,
+        hmm_random_restarts=hmm_random_restarts,
+    )
+    first_result = batch_result.iloc[0]
+    result: RegimeMeanForecast = {
+        "prediction": float(first_result["prediction"]),
+        "selected_k": int(first_result["selected_k"]),
+        "predicted_regime": int(first_result["predicted_regime"]),
+    }
+    return result
+
+
+def forecast_regime_mean_batch(
+    train_features: pd.DataFrame,
+    train_target: pd.Series,
+    test_features: pd.DataFrame,
+    model_type: Literal["gmm", "hmm"],
+    min_k: int,
+    max_k: int,
+    hmm_n_iter: int = 200,
+    hmm_random_restarts: int = 10,
+) -> pd.DataFrame:
+    """Fit one latent-state model and forecast a complete test block.
+
+    Parameters
+    ----------
+    train_features : pd.DataFrame
+        Leakage-safe training feature matrix.
+    train_target : pd.Series
+        Training realized-volatility target aligned to ``train_features``.
+    test_features : pd.DataFrame
+        Test-block feature rows in chronological order.
+    model_type : {"gmm", "hmm"}
+        Gaussian Mixture Model (GMM) or Hidden Markov Model (HMM).
+    min_k : int
+        Minimum candidate regime count.
+    max_k : int
+        Maximum candidate regime count.
+    hmm_n_iter : int, default=200
+        Maximum expectation-maximization iterations for an HMM fit.
+    hmm_random_restarts : int, default=10
+        Number of HMM random initializations.
+
+    Returns
+    -------
+    pd.DataFrame
+        Index matches ``test_features``. Columns are ``prediction``,
+        ``selected_k``, and ``predicted_regime``.
+
+    Notes
+    -----
+    Scaling and model fitting use training rows only. GMM test states are
+    independent conditional assignments. Each HMM test state is decoded as
+    the last observation of the training sequence plus that one test row,
+    preserving the single-row forecast semantics without refitting the HMM.
+    """
+    if test_features.empty:
+        return pd.DataFrame(
+            columns=["prediction", "selected_k", "predicted_regime"],
+            index=test_features.index,
+        )
+
+    # Standardize from train data only, then transform the full test block with
+    # the same scaler. Test information never enters the fitted scale.
     train_feature_matrix = train_features.to_numpy(dtype=float)
     standardized_train_features, fitted_scaler = standardize_features(
         feature_matrix=train_feature_matrix
     )
-
-    test_feature_frame = test_row.reindex(train_features.columns).to_frame().T
-    test_feature_matrix = test_feature_frame.to_numpy(dtype=float)
-    standardized_test_features = fitted_scaler.transform(test_feature_matrix)
+    ordered_test_features = test_features.reindex(columns=train_features.columns)
+    standardized_test_features = fitted_scaler.transform(
+        ordered_test_features.to_numpy(dtype=float)
+    )
     atm_iv_column_index = _atm_iv_column_index(train_features=train_features)
 
     if model_type == "gmm":
-        # GMM predicts the test regime from the test row independently.
+        # GMM assigns every test row independently under one train-only fit.
         train_labels, _, selected_k, fitted_model = fit_gmm(
             feature_matrix=standardized_train_features,
             min_k=min_k,
             max_k=max_k,
         )
-        predicted_test_label = int(fitted_model.predict(standardized_test_features)[0])
+        predicted_test_labels = fitted_model.predict(standardized_test_features)
     elif model_type == "hmm":
         # HMM reuses the same K-selection rule, then fits with sequence
         # dynamics so state decoding can use transition persistence.
@@ -315,13 +440,20 @@ def forecast_regime_mean(
             n_restarts=hmm_random_restarts,
         )
 
-        # Decode the test row as the final step of the observed sequence so the
-        # HMM state assignment uses transition persistence from the train path.
-        full_standardized_sequence = np.vstack(
-            [standardized_train_features, standardized_test_features]
+        # Preserve the established one-date forecast contract: each state is
+        # decoded from the train sequence plus that row, with no future test
+        # rows included in its information set.
+        predicted_test_labels = np.asarray(
+            [
+                int(
+                    fitted_model.predict(
+                        np.vstack([standardized_train_features, test_feature_row])
+                    )[-1]
+                )
+                for test_feature_row in standardized_test_features
+            ],
+            dtype=int,
         )
-        full_sequence_labels = fitted_model.predict(full_standardized_sequence)
-        predicted_test_label = int(full_sequence_labels[-1])
     else:
         raise ValueError("model_type must be either 'gmm' or 'hmm'")
 
@@ -347,16 +479,20 @@ def forecast_regime_mean(
         .mean()
     )
 
-    predicted_ordered_label = original_to_ordered.get(predicted_test_label)
-    forecast_value, predicted_regime = _forecast_from_ordered_regime(
-        predicted_ordered_label=predicted_ordered_label,
-        ordered_target_means=ordered_target_means,
-        train_target=train_target,
-    )
+    result_rows: list[dict[str, float | int]] = []
+    for predicted_test_label in predicted_test_labels:
+        predicted_ordered_label = original_to_ordered.get(int(predicted_test_label))
+        forecast_value, predicted_regime = _forecast_from_ordered_regime(
+            predicted_ordered_label=predicted_ordered_label,
+            ordered_target_means=ordered_target_means,
+            train_target=train_target,
+        )
+        result_rows.append(
+            {
+                "prediction": forecast_value,
+                "selected_k": int(selected_k),
+                "predicted_regime": predicted_regime,
+            }
+        )
 
-    result: RegimeMeanForecast = {
-        "prediction": forecast_value,
-        "selected_k": int(selected_k),
-        "predicted_regime": predicted_regime,
-    }
-    return result
+    return pd.DataFrame(result_rows, index=test_features.index)

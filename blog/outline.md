@@ -16,8 +16,9 @@
   4. Defining forward realized volatility and the regime-mean forecast.
   5. Preventing overlap leakage with the target embargo.
   6. Descriptive evidence from the tracked SPX and NDX demo data.
-  7. Why the configured walk-forward result is empty and what can still be concluded.
-  8. A defensible next experiment.
+  7. The original empty-run diagnosis and corrected safe-window contract.
+  8. Out-of-sample results against ATM IV and the historical mean.
+  9. What the failed incremental comparison means in finance terms.
 
 ## Planned equations
 
@@ -42,8 +43,12 @@
    - Symbols: training date position $i(t)$, test start position $i(s)$, horizon $h$.
    - Delimiter: display.
 6. Out-of-sample $R^2$ versus ATM implied volatility:
-   - Purpose: define the relative score produced by the reporting layer.
-   - Symbols: model mean squared error and benchmark mean squared error.
+   - Purpose: define the relative score against either ATM IV or the historical mean.
+   - Symbols: model mean squared error $\mathrm{MSE}_m$ and benchmark mean squared error $\mathrm{MSE}_b$.
+   - Delimiter: display.
+7. GMM parameter count:
+   - Purpose: derive the BIC penalty for full-covariance mixtures.
+   - Symbols: component count $K$ and feature dimension $d$.
    - Delimiter: display.
 
 ## Planned code excerpts
@@ -55,29 +60,30 @@
    - Function/block: `_apply_forward_target_embargo`.
    - Why include this excerpt: it protects the central methodological claim.
 3. File: `src/volatility_regimes/walkforward/reporting.py`
-   - Function/block: relative out-of-sample score.
-   - Why include this excerpt: it makes the benchmark comparison unambiguous.
+   - Function/block: relative out-of-sample scores against ATM IV and the historical mean.
+   - Why include this excerpt: it separates beating implied volatility from adding information beyond an unconditional forecast.
 
 ## Planned technical graphs
 
 1. Graph type: SPX near-term ATM implied volatility through time with full-sample Gaussian-mixture regime shading.
    - Source: generate from tracked Parquet data with `blog/generate_charts.py`.
    - Expected takeaway: ordered states mostly separate volatility level, while transitions cluster around sharp changes.
-2. Graph type: regime profile chart for SPX and NDX.
-   - Source: generate from frozen blog summary data.
-   - Expected takeaway: higher ordered regimes have higher implied and forward realized volatility in the demo sample.
-3. Graph type: ATM implied volatility versus 20-day forward realized volatility, coloured by descriptive regime.
-   - Source: generate from tracked Parquet data.
-   - Expected takeaway: the relationship is positive but dispersed; descriptive separation alone does not establish forecast improvement.
+2. Graph type: out-of-sample RMSE bars for all five forecast models and both symbols.
+   - Source: generate from the frozen corrected walk-forward metric table.
+   - Expected takeaway: the historical mean narrowly beats the GMM and linear models, while ATM IV and trailing realized volatility are weaker.
+3. Graph type: cumulative GMM squared-error loss minus historical-mean loss.
+   - Source: generate from the frozen row-level forecast panel.
+   - Expected takeaway: any regime advantage is time-dependent and disappears by the end of the sample.
 
 ## Risks, gaps, and assumptions
 
 - Data gaps: the tracked Parquet files are portable demo inputs. They cover 2010-01-04 through 2024-12-31 but should not be presented as production vendor history.
 - Assumptions: descriptive regimes use the complete sample and are explicitly labelled in-sample. Implied volatilities and realized volatilities are decimals and annualized realized volatility uses 252 trading days.
-- Known configured-result gap: after feature completeness, the 20-day forward target, and the 3,880-row minimum training requirement are combined, the default walk-forward run produces no forecast observations. The article will not report forecast superiority.
+- Corrected configuration: the old 3,880-row threshold exceeded the 3,872-row aligned panel before embargo. `min_train_size` now means post-embargo safe labels and is set to 2,520, approximately ten trading years. Impossible experiments fail before writing outputs.
+- Result limitation: adjacent 20-day targets overlap by 19 returns, so daily loss observations are dependent and the report provides point estimates without overlap-adjusted inference.
 - Validation checks to run before final draft: regenerate every chart; freeze summary CSV files under `blog/data/`; verify regime ordering; trace the forward-volatility shift and embargo inequality on a small date sequence; run the project tests and the blog validator; verify both language files reference the same images.
 - Deployment note: the canonical workspace is `volatility-regimes/blog/`. The usual publish bundle would be under `~/projects/website/content/post/volatility-surface-regimes/`, but the user explicitly deferred publication. Nothing will be copied to, built in, committed in, or pushed from the website repository during this task.
 
 ## Outline review
 
-The outline passes the four coverage checks: it states the research question, derives the methodology, limits evidence to reproducible descriptive outputs, and separates practical interpretation from claims the empty configured forecast panel cannot support. The main drafting risk is overstating what full-sample clusters prove; the evidence section and conclusion will keep prediction and description separate.
+The revised outline passes the four coverage checks: it states the research question, derives the regime and embargo methods, reports reproducible walk-forward evidence, and interprets the failed comparison against the historical mean. The main drafting risk remains overstating a teaching dataset; the article labels the full-sample regime chart as descriptive, treats overlapping losses as dependent, and limits its conclusion to the tracked demo data and one configuration.

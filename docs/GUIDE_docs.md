@@ -29,6 +29,8 @@ It should not become a dumping ground for run logs, generated summaries, or dupl
 
 - `user/offline_cache_policy.md`: defines the required `data/raw/` Parquet-plus-sidecar
   contract, validation checks, and ClickHouse fallback behavior.
+- `reference/walkforward_methodology.md`: defines target alignment, embargo,
+  minimum safe-history semantics, forecast rows, and relative metrics.
 
 Where to start:
 
@@ -41,3 +43,5 @@ Where to start:
 - 2026-04-19: Updated docs focus to the `data/raw/` portability contract and
   optional ClickHouse refresh path.
 - 2026-05-20: Moved user docs under `docs/user/` to match the standard layout.
+- 2026-07-13: Added a stable reference for walk-forward alignment, capacity,
+  and benchmark contracts after correcting the empty default experiment.

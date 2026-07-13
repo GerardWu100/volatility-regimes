@@ -17,6 +17,8 @@ Core definitions:
   a fixed horizon.
 - **Regime-mean forecast**: infer the current latent regime, then forecast with
   the historical mean target in that regime.
+- **Target embargo**: remove training labels whose future return window reaches
+  the first test date.
 
 For horizon $h$ trading days:
 
@@ -29,7 +31,23 @@ $$
 $$
 
 The walk-forward layer enforces an embargo so training labels never overlap
-returns used by the test window.
+returns used by the test window. In `walkforward.toml`, `min_train_size` is the
+minimum number of labelled training rows that must remain after this embargo.
+The default is `2520`, approximately ten trading years at 252 days per year.
+If the aligned sample cannot leave that many safe labels plus one test row, the
+CLI raises a configuration error instead of writing empty result files.
+
+The default panel compares five forecasts:
+
+- current ATM implied volatility
+- expanding historical mean realized volatility
+- trailing realized volatility
+- linear regression on the selected surface features
+- Gaussian Mixture Model (GMM) regime mean
+
+The historical mean is the minimum test for incremental model information. A
+regime forecast can beat ATM implied volatility while adding nothing beyond the
+unconditional realized-volatility level.
 
 ## Offline-First Quickstart
 
@@ -139,5 +157,6 @@ src/volatility_regimes/
 - `outputs/reports/descriptive/`: CSV and text tables from full-sample analysis.
 - `outputs/figures/descriptive/`: PNG charts from full-sample analysis.
 - `outputs/reports/walkforward/`: forecast panel CSV, metric summary CSV, markdown
-  summary.
+  summary. The metric table reports out-of-sample $R^2$ versus both ATM implied
+  volatility and the expanding historical mean.
 - `outputs/figures/walkforward/`: walk-forward diagnostic plots when generated.
