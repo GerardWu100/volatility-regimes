@@ -8,10 +8,10 @@ between the training labels and each forward-looking test chunk.
 from __future__ import annotations
 
 from pathlib import Path
-import tomllib
 
 import pandas as pd
 import pytest
+import tomllib
 
 
 def test_walkforward_config_defaults_use_demo_profile() -> None:

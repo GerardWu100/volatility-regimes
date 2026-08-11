@@ -7,17 +7,18 @@ provided training window and the current test row.
 
 from __future__ import annotations
 
-from typing import Literal
-from typing import TypedDict
+from typing import Literal, TypedDict
 
 import numpy as np
 import pandas as pd
 from sklearn.linear_model import LinearRegression
 
-from volatility_regimes.regimes.latent_models import fit_gmm
-from volatility_regimes.regimes.latent_models import fit_hmm
-from volatility_regimes.regimes.latent_models import order_regimes_by_volatility
-from volatility_regimes.regimes.latent_models import standardize_features
+from volatility_regimes.regimes.latent_models import (
+    fit_gmm,
+    fit_hmm,
+    order_regimes_by_volatility,
+    standardize_features,
+)
 
 
 class RegimeMeanForecast(TypedDict):

@@ -18,15 +18,15 @@ and JSON metadata sidecars.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
-from pathlib import Path
 import logging
+from collections.abc import Callable
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import clickhouse_connect
-from clickhouse_connect.driver import Client
 import pandas as pd
+from clickhouse_connect.driver import Client
 
 logger = logging.getLogger(__name__)
 
@@ -596,7 +596,7 @@ def _load_dataset_with_cache(
 
     try:
         dataframe = query_from_clickhouse()
-    except Exception as error:  # noqa: BLE001
+    except Exception as error:
         if cache_config is None:
             raise
 

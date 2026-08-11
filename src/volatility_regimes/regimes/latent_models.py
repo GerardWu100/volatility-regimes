@@ -16,8 +16,8 @@ from __future__ import annotations
 
 import logging
 
-from hmmlearn.hmm import GaussianHMM
 import numpy as np
+from hmmlearn.hmm import GaussianHMM
 from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler
 

@@ -41,7 +41,6 @@ import pandas as pd
 from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler
 
-
 BLOG_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = BLOG_ROOT.parent
 DATA_DIR = BLOG_ROOT / "data"
@@ -465,7 +464,7 @@ def main() -> None:
         audit_rows.append(
             {
                 "symbol": symbol,
-                "feature_rows": int(len(features)),
+                "feature_rows": len(features),
                 "complete_20d_target_rows": complete_target_rows,
                 "fully_aligned_rows_with_trailing_rv": fully_aligned_rows,
                 "configured_min_train_size": DEFAULT_MIN_TRAIN_SIZE,

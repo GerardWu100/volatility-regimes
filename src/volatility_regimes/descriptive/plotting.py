@@ -11,9 +11,9 @@ from pathlib import Path
 
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
-from matplotlib.patches import Patch
 import numpy as np
 import pandas as pd
+from matplotlib.patches import Patch
 
 from volatility_regimes.project_paths import FIGURES_DESCRIPTIVE_DIR
 
@@ -431,7 +431,9 @@ def plot_vol_surface_snapshots(
         fontweight="bold",
     )
 
-    output_path = FIGURES_DESCRIPTIVE_DIR / f"vol_surface_snapshots_{symbol.lower()}.png"
+    output_path = (
+        FIGURES_DESCRIPTIVE_DIR / f"vol_surface_snapshots_{symbol.lower()}.png"
+    )
     fig.savefig(output_path, dpi=150)
     plt.close(fig)
 

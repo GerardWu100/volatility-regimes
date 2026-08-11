@@ -93,7 +93,7 @@ def summarize_metrics(forecast_panel: pd.DataFrame) -> pd.DataFrame:
                 "mae": mae,
                 "oos_r_squared_vs_atm": relative_scores["atm_iv"],
                 "oos_r_squared_vs_historical_mean": relative_scores["historical_mean"],
-                "n_forecasts": int(len(group_frame)),
+                "n_forecasts": len(group_frame),
             }
         )
 

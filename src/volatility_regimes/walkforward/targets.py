@@ -73,9 +73,7 @@ def _forward_realized_vol(
         Forward realized volatility indexed by date.
     """
     if horizon < 2:
-        raise ValueError(
-            "horizon must be at least 2 to compute realized volatility"
-        )
+        raise ValueError("horizon must be at least 2 to compute realized volatility")
 
     log_returns = np.log(close_series / close_series.shift(1))
     rolling_std = log_returns.rolling(window=horizon).std()
@@ -136,8 +134,6 @@ def build_forward_targets(
     # row-matched even when the price history has extra dates.
     targets = features.iloc[:, 0:0].copy()
     targets["realized_vol"] = realized_vol.reindex(features.index)
-    targets["variance_risk_premium"] = (
-        features["atm_iv_near"] - targets["realized_vol"]
-    )
+    targets["variance_risk_premium"] = features["atm_iv_near"] - targets["realized_vol"]
     targets["forward_return"] = forward_return.reindex(features.index)
     return targets
