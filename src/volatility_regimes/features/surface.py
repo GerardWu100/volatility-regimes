@@ -4,13 +4,13 @@ This module converts cleaned options rows into a daily feature matrix used by
 the regime classifiers. Features are computed in delta space because delta is a
  scale-normalized moneyness coordinate across strike levels and spot levels.
 
-Daily output columns
---------------------
+Daily output columns, in the order they appear in the returned DataFrame
+-----------------------------------------------------------------------
 1. atm_iv_near
-2. atm_iv_mid
-3. skew_near
-4. skew_mid
-5. butterfly_near
+2. skew_near
+3. butterfly_near
+4. atm_iv_mid
+5. skew_mid
 6. butterfly_mid
 7. term_slope
 
@@ -43,9 +43,7 @@ FEATURE_SET_REGISTRY: dict[str, tuple[str, ...]] = {
         "term_slope",
     ),
     # ATM-only view keeps only the near-term ATM level.
-    "atm_only": (
-        "atm_iv_near",
-    ),
+    "atm_only": ("atm_iv_near",),
     # ATM plus term structure isolates level and slope information.
     "atm_term": (
         "atm_iv_near",
@@ -68,9 +66,7 @@ FEATURE_SET_REGISTRY: dict[str, tuple[str, ...]] = {
 }
 
 
-def select_feature_columns(
-    features: pd.DataFrame, feature_set: str
-) -> pd.DataFrame:
+def select_feature_columns(features: pd.DataFrame, feature_set: str) -> pd.DataFrame:
     """Select a named, deterministic subset of feature columns.
 
     Parameters
@@ -98,8 +94,7 @@ def select_feature_columns(
     except KeyError as error:
         available_sets = ", ".join(sorted(FEATURE_SET_REGISTRY))
         message = (
-            f"Unknown feature set '{feature_set}'. "
-            f"Available sets: {available_sets}"
+            f"Unknown feature set '{feature_set}'. Available sets: {available_sets}"
         )
         raise ValueError(message) from error
 
@@ -244,6 +239,7 @@ def _assign_expiry_bucket_features(
     day_data: pd.DataFrame,
     bucket_prefix: str,
     selected_dte: int | None,
+    atm_delta: float,
     wing_delta: float,
     min_strikes: int,
 ) -> None:
@@ -259,6 +255,7 @@ def _assign_expiry_bucket_features(
     expiry_slice = day_data.loc[day_data["dte"] == selected_dte]
     expiry_features = _extract_features_one_expiry(
         expiry_data=expiry_slice,
+        atm_delta=atm_delta,
         wing_delta=wing_delta,
         min_strikes_per_side=min_strikes,
     )
@@ -269,10 +266,15 @@ def _assign_expiry_bucket_features(
 
 def _extract_features_one_expiry(
     expiry_data: pd.DataFrame,
+    atm_delta: float,
     wing_delta: float,
     min_strikes_per_side: int,
 ) -> dict[str, float]:
-    """Extract ATM, skew, and butterfly for one date-expiry slice."""
+    """Extract ATM, skew, and butterfly for one date-expiry slice.
+
+    `atm_delta` and `wing_delta` are absolute delta magnitudes. Put deltas are
+    negative, so the put side is queried at `-atm_delta` and `-wing_delta`.
+    """
     puts = expiry_data.loc[expiry_data["option_type"] == "p"]
     calls = expiry_data.loc[expiry_data["option_type"] == "c"]
 
@@ -287,7 +289,7 @@ def _extract_features_one_expiry(
     if len(calls) < min_strikes_per_side:
         return empty_result
 
-    atm_iv = interpolate_iv_at_delta(puts, target_delta=-0.50)
+    atm_iv = interpolate_iv_at_delta(puts, target_delta=-abs(atm_delta))
     skew_value = compute_skew(put_chain=puts, call_chain=calls, wing_delta=wing_delta)
 
     put_wing_iv = interpolate_iv_at_delta(puts, target_delta=-wing_delta)
@@ -309,6 +311,7 @@ def extract_features(
     mid_dte_min: int = 45,
     mid_dte_target: int = 90,
     mid_dte_max: int = 120,
+    atm_delta: float = 0.50,
     wing_delta: float = 0.25,
     min_strikes: int = 5,
 ) -> pd.DataFrame:
@@ -337,6 +340,9 @@ def extract_features(
         Target DTE for selecting mid-term expiry.
     mid_dte_max : int, default=120
         Upper bound for mid-term expiry bucket.
+    atm_delta : float, default=0.50
+        Absolute delta magnitude used for the at-the-money implied-volatility
+        reading. The put side is interpolated at `-atm_delta`.
     wing_delta : float, default=0.25
         Wing delta magnitude for skew and butterfly.
     min_strikes : int, default=5
@@ -366,6 +372,7 @@ def extract_features(
             day_data=day_data,
             bucket_prefix="near",
             selected_dte=near_dte,
+            atm_delta=atm_delta,
             wing_delta=wing_delta,
             min_strikes=min_strikes,
         )
@@ -374,6 +381,7 @@ def extract_features(
             day_data=day_data,
             bucket_prefix="mid",
             selected_dte=mid_dte,
+            atm_delta=atm_delta,
             wing_delta=wing_delta,
             min_strikes=min_strikes,
         )

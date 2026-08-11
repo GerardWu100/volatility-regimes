@@ -206,7 +206,7 @@ def regime_transition_stats(
         else:
             avg_duration[regime_id] = 0.0
 
-    transition_count = int(len(change_indices))
+    transition_count = len(change_indices)
     denominator = max(len(regime_labels) - 1, 1)
     transition_rate = transition_count / denominator
 
@@ -275,6 +275,7 @@ def forward_returns_by_regime(
     features: pd.DataFrame,
     regime_labels: np.ndarray,
     horizon: int = 20,
+    annualization: int = 252,
 ) -> pd.DataFrame:
     """Compute forward return distribution summary by regime.
 
@@ -288,6 +289,9 @@ def forward_returns_by_regime(
         Regime labels aligned to `features` index.
     horizon : int, default=20
         Forward-return horizon in trading days.
+    annualization : int, default=252
+        Trading days per year used to scale the horizon Sharpe ratio to an
+        annual figure.
 
     Returns
     -------
@@ -306,7 +310,9 @@ def forward_returns_by_regime(
     grouped = aligned.groupby("regime")["fwd_return"].agg(["mean", "std", "count"])
     grouped.columns = ["mean_return", "std_return", "count"]
 
-    annualization_ratio = np.sqrt(252 / horizon)
+    # There are annualization/horizon non-overlapping windows in a year, so the
+    # per-window Sharpe ratio scales by the square root of that count.
+    annualization_ratio = np.sqrt(annualization / horizon)
     grouped["sharpe"] = (
         grouped["mean_return"] / grouped["std_return"] * annualization_ratio
     )

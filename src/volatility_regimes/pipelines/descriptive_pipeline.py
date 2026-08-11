@@ -12,13 +12,13 @@ This module orchestrates one full-sample descriptive workflow:
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 import sys
-import tomllib
 
 import numpy as np
 import pandas as pd
+import tomllib
 
+from volatility_regimes.data_access.loader import load_daily_prices, load_options
 from volatility_regimes.descriptive.analytics import (
     REGIME_NAMES,
     compute_realized_vol,
@@ -29,8 +29,6 @@ from volatility_regimes.descriptive.analytics import (
     regime_transition_stats,
     regime_vrp_stats,
 )
-from volatility_regimes.data_access.loader import load_daily_prices, load_options
-from volatility_regimes.features.surface import extract_features
 from volatility_regimes.descriptive.plotting import (
     plot_bic_curve,
     plot_feature_distributions,
@@ -40,6 +38,7 @@ from volatility_regimes.descriptive.plotting import (
     plot_vol_surface_snapshots,
     plot_vrp_by_regime,
 )
+from volatility_regimes.features.surface import extract_features
 from volatility_regimes.project_paths import PROJECT_ROOT, REPORTS_DESCRIPTIVE_DIR
 from volatility_regimes.regimes.latent_models import (
     fit_gmm,
@@ -164,6 +163,7 @@ def run_pipeline_for_symbol(
         mid_dte_min=int(feature_config["mid_term_dte_min"]),
         mid_dte_target=int(feature_config["mid_term_dte_target"]),
         mid_dte_max=int(feature_config["mid_term_dte_max"]),
+        atm_delta=float(feature_config["atm_delta"]),
         wing_delta=float(feature_config["wing_delta"]),
         min_strikes=int(feature_config["min_strikes_per_side"]),
     )
@@ -192,11 +192,15 @@ def run_pipeline_for_symbol(
         n_restarts=int(regime_config["hmm_random_restarts"]),
     )
 
+    # Look the ATM IV column up by name. Ordering regimes by whatever happens to
+    # sit in column 0 would silently rank them on the wrong feature if the
+    # feature matrix ever changes order.
+    atm_iv_column_index = int(features_clean.columns.get_loc("atm_iv_near"))
     hmm_labels = order_regimes_by_volatility(
-        hmm_labels_raw, standardized_matrix, atm_iv_col_idx=0
+        hmm_labels_raw, standardized_matrix, atm_iv_col_idx=atm_iv_column_index
     )
     gmm_labels = order_regimes_by_volatility(
-        gmm_labels, standardized_matrix, atm_iv_col_idx=0
+        gmm_labels, standardized_matrix, atm_iv_col_idx=atm_iv_column_index
     )
     transition_matrix = _recompute_transition_matrix_from_labels(
         hmm_labels, n_states=best_k
@@ -218,6 +222,7 @@ def run_pipeline_for_symbol(
         features_clean,
         hmm_labels,
         horizon=int(analysis_config["realized_vol_window"]),
+        annualization=int(analysis_config["annualization_factor"]),
     )
     regression_results = predictive_regression(
         features_clean, realized_vol, hmm_labels, best_k

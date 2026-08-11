@@ -159,6 +159,7 @@ def _pipeline_config() -> dict[str, object]:
             "mid_term_dte_min": 45,
             "mid_term_dte_target": 90,
             "mid_term_dte_max": 120,
+            "atm_delta": 0.50,
             "wing_delta": 0.25,
             "min_strikes_per_side": 5,
         },
@@ -182,7 +183,7 @@ def test_pipeline_cache_hit_runs_with_db_down(
     """Pipeline succeeds from cache while ClickHouse query functions are down."""
     import volatility_regimes.data_access.loader as data_loader
     import volatility_regimes.pipelines.descriptive_pipeline as main
-    import volatility_regimes.descriptive.plotting as plotting
+    from volatility_regimes.descriptive import plotting
 
     options = _make_pipeline_options(symbol_seed=7)
     prices = _make_pipeline_prices(symbol_seed=13)
@@ -219,7 +220,7 @@ def test_pipeline_cache_miss_queries_db_and_writes_cache(
     """Pipeline uses DB query path on cache miss and writes both cache datasets."""
     import volatility_regimes.data_access.loader as data_loader
     import volatility_regimes.pipelines.descriptive_pipeline as main
-    import volatility_regimes.descriptive.plotting as plotting
+    from volatility_regimes.descriptive import plotting
 
     options = _make_pipeline_options(symbol_seed=21)
     prices = _make_pipeline_prices(symbol_seed=29)

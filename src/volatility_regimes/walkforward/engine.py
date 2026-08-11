@@ -7,15 +7,16 @@ subsets, and forecast horizons.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
-import tomllib
-from typing import Callable
 
 import numpy as np
 import pandas as pd
+import tomllib
 
 from volatility_regimes.data_access.loader import load_daily_prices, load_options
 from volatility_regimes.features.surface import extract_features, select_feature_columns
+from volatility_regimes.project_paths import PROJECT_ROOT, REPORTS_WALKFORWARD_DIR
 from volatility_regimes.walkforward.models import (
     forecast_atm_iv,
     forecast_historical_mean,
@@ -29,9 +30,6 @@ from volatility_regimes.walkforward.reporting import (
 )
 from volatility_regimes.walkforward.splits import build_expanding_window_splits
 from volatility_regimes.walkforward.targets import build_forward_targets
-
-
-from volatility_regimes.project_paths import PROJECT_ROOT, REPORTS_WALKFORWARD_DIR
 
 OUTPUT_DIR = REPORTS_WALKFORWARD_DIR
 
@@ -174,6 +172,7 @@ def _load_symbol_inputs(
         mid_dte_min=int(feature_config["mid_term_dte_min"]),
         mid_dte_target=int(feature_config["mid_term_dte_target"]),
         mid_dte_max=int(feature_config["mid_term_dte_max"]),
+        atm_delta=float(feature_config["atm_delta"]),
         wing_delta=float(feature_config["wing_delta"]),
         min_strikes=int(feature_config["min_strikes_per_side"]),
     ).dropna()
@@ -320,7 +319,7 @@ def _maximum_safe_train_size(
         horizon=horizon,
         price_date_positions=price_date_positions,
     )
-    return int(len(safe_index))
+    return len(safe_index)
 
 
 def _append_forecast_row(
