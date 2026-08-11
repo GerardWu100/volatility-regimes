@@ -1,162 +1,109 @@
-# Volatility Surface Regime Research
+# Volatility Regimes
 
-Offline-first quantitative research repository for one central question:
+Offline-first research repo asking one question: do latent volatility-surface
+regimes improve out-of-sample forecasts of future realized volatility, versus
+simple benchmarks? The project is notebook-first for teaching and interview
+use, with reusable package code under `src/volatility_regimes/`.
 
-> Do latent volatility-surface regimes improve out-of-sample forecasts of future realized volatility relative to simple benchmarks?
+## What it does
 
-The project is intentionally notebook-first for teaching and interview use, with
-reusable package code under `src/volatility_regimes/`.
+Uses SPX and NDX options and price data to build daily volatility-surface
+features (ATM implied volatility, skew, term structure), fit latent regimes
+with a Gaussian Mixture Model (GMM) and a Gaussian Hidden Markov Model (HMM),
+and forecast forward realized volatility over a fixed horizon.
 
-## Research Framing
+Two pipelines:
 
-Core definitions:
+- **Descriptive** (`volatility_regimes.pipelines.descriptive_pipeline`): full-sample
+  feature engineering, regime fitting, and descriptive tables/charts.
+- **Walk-forward** (`volatility_regimes.walkforward.engine`): expanding-window
+  out-of-sample forecasting with a forward-target embargo (training labels
+  whose return window reaches the test date are dropped). Each test block
+  compares five forecasts: current ATM implied volatility, expanding
+  historical mean realized volatility, trailing realized volatility, an OLS
+  linear regression on surface features, and the GMM regime-mean forecast.
 
-- **ATM IV** (at-the-money implied volatility): implied volatility near delta
-  magnitude `0.50`.
-- **Forward realized volatility**: future standard deviation of log returns over
-  a fixed horizon.
-- **Regime-mean forecast**: infer the current latent regime, then forecast with
-  the historical mean target in that regime.
-- **Target embargo**: remove training labels whose future return window reaches
-  the first test date.
-
-For horizon $h$ trading days:
-
-- $P_t$: close price at day $t$
-- $r_t = \log(P_t / P_{t-1})$: daily log return
-- $A$: annualization factor (default `252`)
+Forward realized volatility for horizon $h$ trading days, annualization
+factor $A$, and daily log return $r_t = \log(P_t / P_{t-1})$:
 
 $$
 \mathrm{RV}_t(h) = \mathrm{std}(r_{t+1}, \ldots, r_{t+h}) \times \sqrt{A}
 $$
 
-The walk-forward layer enforces an embargo so training labels never overlap
-returns used by the test window. In `walkforward.toml`, `min_train_size` is the
-minimum number of labelled training rows that must remain after this embargo.
-The default is `2520`, approximately ten trading years at 252 days per year.
-If the aligned sample cannot leave that many safe labels plus one test row, the
-CLI raises a configuration error instead of writing empty result files.
+Full methodology, including the embargo definition and metrics: see
+`docs/reference/walkforward_methodology.md` and `GUIDE_ROOT.md`.
 
-The default panel compares five forecasts:
+## Requirements
 
-- current ATM implied volatility
-- expanding historical mean realized volatility
-- trailing realized volatility
-- linear regression on the selected surface features
-- Gaussian Mixture Model (GMM) regime mean
+- Python 3.13
+- ClickHouse: only needed for a one-time cache refresh when the tracked raw
+  files under `data/raw/` are missing or fail validation. Normal runs, tests,
+  and the notebook work offline against `data/raw/`.
+- If ClickHouse is used, these environment variables (read from `.env`):
+  `CLICKHOUSE_HOST`, `CLICKHOUSE_PORT`, `CLICKHOUSE_USER`,
+  `CLICKHOUSE_PASSWORD`, `CLICKHOUSE_SECURE`, `CLICKHOUSE_VERIFY`.
 
-The historical mean is the minimum test for incremental model information. A
-regime forecast can beat ATM implied volatility while adding nothing beyond the
-unconditional realized-volatility level.
-
-## Offline-First Quickstart
-
-1. Sync environment:
+## Setup
 
 ```bash
 uv sync --group dev
 ```
 
-2. Run tests:
+## Usage
 
 ```bash
-uv run python -m pytest -v
+uv run python -m pytest -v                          # run tests
+uv run python -m volatility_regimes.cli.descriptive  # descriptive pipeline
+uv run python -m volatility_regimes.cli.walkforward  # walk-forward pipeline
 ```
 
-3. Run descriptive pipeline:
+`scripts/run_descriptive.sh` and `scripts/run_walkforward.sh` are thin
+wrappers around the two CLI commands above.
+
+To run the teaching notebook top to bottom:
 
 ```bash
-uv run python -m volatility_regimes.cli.descriptive
-# or: ./scripts/run_descriptive.sh
+uv run jupyter nbconvert --to notebook --execute \
+  notebooks/project_demo_walkthrough.ipynb \
+  --output project_demo_walkthrough.executed.ipynb
 ```
 
-4. Run walk-forward pipeline:
+## Configuration
 
-```bash
-uv run python -m volatility_regimes.cli.walkforward
-# or: ./scripts/run_walkforward.sh
-```
+- `config.toml`: shared data window (`symbols`, `start_date`, `end_date`),
+  offline-cache policy (`[cache]`), surface-feature parameters (`[features]`),
+  and regime model settings (`[regime]`, GMM `min_k`/`max_k`, HMM iteration
+  and restart counts).
+- `walkforward.toml`: walk-forward experiment settings — `horizons`,
+  `feature_sets`, `min_train_size` (default `2520`, about ten trading years,
+  the minimum leakage-safe training rows after the embargo), `step_size`, and
+  regime model settings for the walk-forward run.
 
-5. Execute notebook top-to-bottom:
-
-```bash
-uv run jupyter nbconvert --to notebook --execute notebooks/project_demo_walkthrough.ipynb --output project_demo_walkthrough.executed.ipynb
-```
-
-## Notebook-First Learning Path
-
-Use `notebooks/project_demo_walkthrough.ipynb` as the primary walkthrough.
-It demonstrates the full offline workflow from `data/raw/` through:
-
-1. raw file validation
-2. price and options loading
-3. target construction
-4. feature engineering
-5. latent regime modeling
-6. walk-forward forecast evaluation
-7. interpretation and limitations
-
-## Offline Portability Contract
-
-- Normal runs read only from `data/raw/` when those files are valid.
-- ClickHouse is attempted only when required raw files are missing or invalid.
-- A fresh clone with tracked raw files can run tests, CLIs, and notebook
-  without `.env`.
-
-Detailed policy: `docs/user/offline_cache_policy.md`
-
-## Portable Demo Data
-
-Tracked raw files live in `data/raw/`:
-
-- `options_spx.parquet` and `options_spx.metadata.json`
-- `options_ndx.parquet` and `options_ndx.metadata.json`
-- `prices_spx.parquet` and `prices_spx.metadata.json`
-- `prices_ndx.parquet` and `prices_ndx.metadata.json`
-
-Total payload is approximately `1.9 MB`, so the repository stays lightweight.
-
-## One-Time ClickHouse Cache Refresh
-
-ClickHouse is optional and used only for one-time cache population/refresh when
-raw files are missing or fail validation. Day-to-day research runs should not
-require database access.
-
-## Repository Layout
+## Layout
 
 ```text
 volatility-regimes/
-├── config.toml
-├── walkforward.toml
-├── src/volatility_regimes/
-├── scripts/
-├── tests/unit/
-├── tests/integration/
-├── data/raw/
-├── outputs/reports/
-├── outputs/figures/
-├── notebooks/
-└── docs/user/
+├── config.toml               # shared data/feature/regime config
+├── walkforward.toml          # walk-forward experiment config
+├── src/volatility_regimes/   # package: data_access, features, regimes, descriptive, walkforward, pipelines, cli
+├── scripts/                  # thin CLI wrapper scripts
+├── tests/unit/, tests/integration/
+├── data/raw/                 # tracked offline parquet inputs (~1.9 MB)
+├── notebooks/                # main teaching walkthrough
+├── docs/                     # methodology and offline-cache policy reference
+└── outputs/                  # reports/ and figures/, descriptive and walkforward
 ```
 
-## Package Layout
+## Output
 
-```text
-src/volatility_regimes/
-├── data_access/
-├── features/
-├── regimes/
-├── descriptive/
-├── walkforward/
-├── pipelines/
-└── cli/
-```
+- `outputs/reports/descriptive/`, `outputs/figures/descriptive/`: CSV tables
+  and PNG charts from the full-sample analysis.
+- `outputs/reports/walkforward/`: forecast panel CSV, metric summary CSV
+  (out-of-sample $R^2$ versus both ATM implied volatility and the expanding
+  historical mean), and a markdown summary.
+- `outputs/figures/walkforward/`: walk-forward diagnostic plots, when
+  generated.
 
-## Outputs
+## License
 
-- `outputs/reports/descriptive/`: CSV and text tables from full-sample analysis.
-- `outputs/figures/descriptive/`: PNG charts from full-sample analysis.
-- `outputs/reports/walkforward/`: forecast panel CSV, metric summary CSV, markdown
-  summary. The metric table reports out-of-sample $R^2$ versus both ATM implied
-  volatility and the expanding historical mean.
-- `outputs/figures/walkforward/`: walk-forward diagnostic plots when generated.
+All rights reserved. See [LICENSE](LICENSE).
