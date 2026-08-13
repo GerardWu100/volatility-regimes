@@ -168,26 +168,25 @@
 
 <p class="eyebrow"><span class="dot"></span>volatility-regimes &middot; code walkthrough</p>
 <h1>Volatility surface regimes: reading the code</h1>
-<p class="lede">What this repository does, how the pieces connect, what each setting changes,
-and where the results should and should not be believed.</p>
+<p class="lede">What the repository does, how its parts connect, what the settings change,
+and which results deserve trust.</p>
 
 <div class="box def">
   <span class="k">How to use this</span>
-  <p>Sections follow execution order. Every code snippet is copied unedited from the file
-  named above it. Every number in a <b>Sample data</b> box was printed by running this
-  repository's own code on the tracked files in <code>data/raw/</code> on 2026-08-10 &mdash;
-  none of them are estimates. Coloured boxes flag design choices, traps and weaknesses.</p>
+  <p>Sections follow execution order. Each code snippet is copied unchanged from the file
+  named above it. Each number in a <b>Sample data</b> box came from this repository's code
+  running on the tracked files in <code>data/raw/</code> on 2026-08-10; none is an estimate.
+  Coloured boxes mark design choices, traps, and weaknesses.</p>
 </div>
 
 <div class="box why">
   <span class="k">The project in plain English</span>
-  <p>An option chain tells you what the market is charging for insurance today. This project
-  turns each day's chain into seven numbers describing the shape of that pricing, groups the
-  days into a small number of unlabelled "states" using a statistical clustering model, and
-  then asks one narrow question: <b>if you know today's state, can you forecast how bumpy the
-  index will actually be over the next month better than four simpler rules can?</b> It answers
-  that question twice &mdash; once loosely on the whole history for description, and once
-  strictly, retraining only on the past at every step, for an honest out-of-sample score.</p>
+  <p>An option chain shows what the market charges for insurance today. This project turns each
+  day's chain into seven numbers that describe its pricing, groups the days into a small number
+  of unlabelled states with a statistical clustering model, and asks one focused question:
+  <b>does knowing today's state improve forecasts of the index's volatility over the next month
+  compared with four simpler rules?</b> It answers that question twice: once over the full history
+  to describe the data, and once by retraining on past data at each step for an out-of-sample score.</p>
 </div>
 
 <h2 id="map"><span class="sec-no">00</span>Map</h2>
@@ -208,9 +207,9 @@ flowchart LR
   feat --> desc["run_pipeline_for_symbol()"]
   desc --> out2[("outputs/*/descriptive")]
 </div>
-<p class="fnote">Boxes are functions; cylinders are files on disk. Arrows are the direction data
-moves. The lower branch is the loose descriptive layer; the upper branch is the strict
-out-of-sample layer. Both start from the same features.</p>
+<p class="fnote">Boxes are functions; cylinders are files on disk. Arrows show where data moves.
+The lower branch describes the full history; the upper branch produces the strict out-of-sample
+result. Both branches use the same features.</p>
 
 <div class="toc">
   <div class="rk">Contents</div>
@@ -238,54 +237,52 @@ out-of-sample layer. Both start from the same features.</p>
 </div>
 
 
-<h2 id="sec1"><span class="sec-no">01</span>The question, and the two layers that answer it</h2>
+<h2 id="sec1"><span class="sec-no">01</span>The question and the two ways it is answered</h2>
 
-<p>The repository is built around one sentence from <code>README.md</code>:</p>
+<p>The repository centres on one question from <code>README.md</code>:</p>
 
 <div class="box gist"><span class="k">In plain words</span>
-<p>Do hidden "states" in the shape of the option-implied volatility surface help you forecast
-how volatile the index will actually be next month, better than simple rules already do?</p></div>
+<p>Do hidden states in the option-implied volatility surface help forecast the index's volatility
+next month better than simple rules?</p></div>
 
-<p>Two code paths answer it, and they answer different things.</p>
+<p>Two code paths answer it, but they serve different purposes.</p>
 
 <div class="scroll">
 <table>
 <thead><tr><th>Layer</th><th>Entry point</th><th>What it does</th><th>Can its numbers be traded on?</th></tr></thead>
 <tbody>
 <tr><td><b>Descriptive</b></td><td><code>pipelines/descriptive_pipeline.py</code></td>
-<td>Fits regimes once on the entire history, then describes each regime: how long it lasts, what the surface looks like inside it, what returns followed it.</td>
-<td><span class="chip c-veto">No</span> The labels were built with knowledge of the whole sample. See <a href="#sec18">limitations</a>.</td></tr>
+<td>Fits regimes once on the full history, then describes each one: its duration, surface, and subsequent returns.</td>
+<td><span class="chip c-veto">No</span> The labels use the full sample. See <a href="#sec18">limitations</a>.</td></tr>
 <tr><td><b>Walk-forward</b></td><td><code>walkforward/engine.py</code></td>
-<td>Steps through time. At each step it refits everything on past data only, forecasts the next five days, and records the error.</td>
-<td><span class="chip c-bug">In principle</span> The leakage controls are real. The data it currently runs on is not.</td></tr>
+<td>Moves through time. At each step it refits on past data only, forecasts the next five days, and records the error.</td>
+<td><span class="chip c-bug">In principle</span> The leakage controls are real, but the current data is not real market data.</td></tr>
 </tbody>
 </table>
 </div>
 
 <div class="box def"><span class="k">Terms used throughout</span>
-<p><b>Implied volatility (IV)</b> &mdash; the volatility number that makes an option pricing formula
-match the option's market price. It is the market's forecast of future movement, in annualized
-percent.<br>
-<b>At-the-money (ATM)</b> &mdash; near where the option's delta is $0.50$ in absolute value, roughly
-a coin flip on finishing in the money.<br>
+<p><b>Implied volatility (IV)</b> &mdash; the volatility value that makes an option-pricing formula
+match the option's market price. It is the market's annualized forecast of future movement.<br>
+<b>At-the-money (ATM)</b> &mdash; near where the option's delta is $0.50$ in absolute value; the
+option is roughly as likely to finish in the money as out of the money.<br>
 <b>Delta</b> &mdash; how much the option price moves per one-dollar move in the index. Calls have
 positive delta, puts negative. It is used here as a scale-free way to say "how far from
 at-the-money", so the same feature means the same thing whether the index is at 1,000 or 5,000.<br>
-<b>Realized volatility (RV)</b> &mdash; the volatility that actually happened, measured after the fact
-from daily returns.<br>
-<b>Regime</b> &mdash; a group of days that a clustering model decided look alike. Nothing more. The
-model is never told what a regime means.<br>
-<b>Look-ahead (leakage)</b> &mdash; using information in a forecast that would not have been
-available at the moment the forecast was supposedly made.</p></div>
+<b>Realized volatility (RV)</b> &mdash; the volatility that occurred, measured after the fact from
+daily returns.<br>
+<b>Regime</b> &mdash; a group of days that a clustering model judged similar. The model is not told
+what a regime means.<br>
+<b>Look-ahead (leakage)</b> &mdash; using information that would not have been available when the
+forecast was made.</p></div>
 
 
 <h2 id="sec2"><span class="sec-no">02</span>Where the settings live &mdash; <code>config.toml</code> and <code>walkforward.toml</code></h2>
 
-<p>There are two configuration files at the repository root, and the split is deliberate:
-<code>config.toml</code> owns anything shared (which symbols, which dates, how a feature is defined,
-how the data cache behaves), and <code>walkforward.toml</code> owns the experiment (horizons, minimum
-training length, step size, output folder). When the walk-forward command runs, it reads both
-and pastes the experiment's date window over the shared one:</p>
+<p>There are two configuration files at the repository root. <code>config.toml</code> holds shared
+settings: symbols, dates, feature definitions, and cache behaviour. <code>walkforward.toml</code>
+holds experiment settings: horizons, minimum training length, step size, and output folder. The
+walk-forward command reads both and replaces the shared date window with the experiment's window:</p>
 
 <pre>def _project_config_with_sample_window(
     project_config: dict[str, object],
@@ -299,40 +296,40 @@ and pastes the experiment's date window over the shared one:</p>
     merged_project_config["data"] = merged_data_config
     return merged_project_config</pre>
 
-<h4>The settings that change results, and what changing them does</h4>
+<h4>Settings that change results</h4>
 
 <div class="scroll">
 <table>
 <thead><tr><th>Setting</th><th>File</th><th>Default</th><th>What happens if you change it</th></tr></thead>
 <tbody>
 <tr><td><code>atm_delta</code></td><td>config</td><td class="n">0.50</td>
-<td>Which put delta is read as "at the money". Moving it to 0.40 makes <code>atm_iv_near</code> a slightly out-of-the-money reading, which on a normal equity smile is higher.</td></tr>
+<td>Which put delta counts as "at the money". At 0.40, <code>atm_iv_near</code> is slightly out of the money and is usually higher on an equity volatility smile.</td></tr>
 <tr><td><code>wing_delta</code></td><td>config</td><td class="n">0.25</td>
-<td>Where skew and curvature are measured. Wider wings (say 0.10) exaggerate both and are noisier because far strikes trade less.</td></tr>
+<td>Where skew and curvature are measured. Wider wings, such as 0.10, exaggerate both and add noise because far strikes trade less.</td></tr>
 <tr><td><code>delta_min</code> / <code>delta_max</code></td><td>config</td><td class="n">0.05 / 0.95</td>
-<td>Filters out deep out-of-the-money and deep in-the-money strikes before anything else. Tightening these can leave too few strikes and turn feature rows into blanks.</td></tr>
+<td>Filters deep out-of-the-money and in-the-money strikes first. A tighter range can leave too few strikes and produce blank feature rows.</td></tr>
 <tr><td><code>min_strikes_per_side</code></td><td>config</td><td class="n">5</td>
-<td>How many put and call strikes an expiry must have before it is trusted. Raising it makes the panel cleaner and shorter.</td></tr>
+<td>How many put and call strikes an expiry needs before it is used. Raising it makes the panel cleaner but shorter.</td></tr>
 <tr><td><code>near_term_dte_*</code> / <code>mid_term_dte_*</code></td><td>config</td><td class="n">15/30/45, 45/90/120</td>
-<td>Which two expiries define the term structure. The bucket is a window; the expiry closest to the target is chosen from inside it.</td></tr>
+<td>Which two expiries define the term structure. Each bucket is a window, and the expiry closest to its target is chosen.</td></tr>
 <tr><td><code>[regime] min_k</code> / <code>max_k</code></td><td>both</td><td class="n">2&ndash;6 desc, 2&ndash;3 walk</td>
-<td>How many regimes are considered. The count is chosen automatically within the range, so widening it lets the model pick a busier story.</td></tr>
+<td>How many regimes are considered. The model chooses a count within the range; widening it gives the model more choices.</td></tr>
 <tr><td><code>horizons</code></td><td>walkforward</td><td class="n">[20]</td>
-<td>The forecast distance in trading days. Longer horizons mean a smoother target, a wider embargo, and fewer usable training rows.</td></tr>
+<td>The forecast distance in trading days. Longer horizons smooth the target, widen the embargo, and reduce usable training rows.</td></tr>
 <tr><td><code>min_train_size</code></td><td>walkforward</td><td class="n">2520</td>
-<td>How many usable training labels must survive the embargo before a forecast is allowed. 2,520 is about ten trading years. Raising it shortens the test period; raising it too far aborts the run with an error.</td></tr>
+<td>How many training labels must remain after the embargo. 2,520 is about ten trading years. Raising it shortens the test period; setting it too high stops the run with an error.</td></tr>
 <tr><td><code>step_size</code></td><td>walkforward</td><td class="n">5</td>
-<td>How many days are forecast before retraining. Larger steps run faster and let the model go slightly stale.</td></tr>
+<td>How many days are forecast before retraining. Larger steps run faster but let the model become slightly stale.</td></tr>
 <tr><td><code>annualization</code></td><td>walkforward</td><td class="n">252</td>
-<td>Trading days per year. It scales every volatility number by $\sqrt{252}$; changing it rescales targets and benchmarks together, so relative scores barely move.</td></tr>
+<td>Trading days per year. It scales every volatility value by $\sqrt{252}$. Changing it rescales targets and benchmarks together, so relative scores barely change.</td></tr>
 <tr><td><code>hmm_random_restarts</code></td><td>both</td><td class="n">10 desc, 5 walk</td>
-<td>How many random starting points the Markov model is given; the highest-scoring fit wins. On the descriptive SPX run six of the ten collapse before scoring, so lowering this can quietly change every regime label. See the <a href="#sec8">warning in section 08</a>.</td></tr>
+<td>How many random starting points the Markov model tries; the highest-scoring fit wins. In the descriptive SPX run, six of ten fail before scoring, so lowering this can change every regime label. See the <a href="#sec8">warning in section 08</a>.</td></tr>
 <tr><td><code>hmm_n_iter</code></td><td>both</td><td class="n">200</td>
-<td>The cap on fitting iterations per restart. Lowering it makes unconverged fits more likely, and an unconverged fit is still used as long as it did not raise an error.</td></tr>
+<td>The iteration limit for each restart. Lowering it makes unconverged fits more likely; such a fit is still used if it raises no error.</td></tr>
 <tr><td><code>realized_vol_window</code></td><td>config</td><td class="n">20</td>
-<td>The descriptive layer's horizon, in trading days. It sets both the realized-volatility window and the forward-return window, so changing it moves the target and the Sharpe scaling together.</td></tr>
+<td>The descriptive layer's horizon in trading days. It sets the realized-volatility and forward-return windows, so changing it moves the target and Sharpe scaling together.</td></tr>
 <tr><td><code>fixed_k_values</code></td><td>walkforward</td><td class="n">[]</td>
-<td>Empty means the extra robustness models are switched off entirely. Any non-empty list also switches the Hidden Markov Model rows on, which is a large slowdown.</td></tr>
+<td>An empty list disables the extra robustness models. Any value also enables the Hidden Markov Model rows, which makes the run much slower.</td></tr>
 </tbody>
 </table>
 </div>
@@ -340,9 +337,9 @@ and pastes the experiment's date window over the shared one:</p>
 <div class="box warn"><span class="k">Trap</span>
 <p>An empty <code>fixed_k_values</code> does more than skip the fixed-count sweep. In
 <code>run_research</code>, <code>include_robustness_models = fixed_k_values is not None</code>, and
-<code>main()</code> converts an empty list to <code>None</code>. So the default run produces
-<b>no Hidden Markov Model rows at all</b>, even though the model is fully implemented and
-tested. If you want the HMM, you must put a value in <code>fixed_k_values</code>.</p></div>
+<code>main()</code> converts an empty list to <code>None</code>. The default run therefore produces
+<b>no Hidden Markov Model rows</b>, even though the model is implemented and tested. To run the HMM,
+put a value in <code>fixed_k_values</code>.</p></div>
 
 
 <h2 id="sec3"><span class="sec-no">03</span>How you run it &mdash; entry points</h2>
@@ -363,12 +360,12 @@ tested. If you want the HMM, you must put a value in <code>fixed_k_values</code>
 </table>
 </div>
 
-<p>The two CLI files are eight lines each and contain no logic &mdash; they import <code>main</code>
-and call it. All the behaviour lives in the package, so the notebook and the command line take
-exactly the same code path.</p>
+<p>The two command-line interface (CLI) files are eight lines each. They import <code>main</code>
+and call it. The package contains all the logic, so the notebook and command line use the same
+code path.</p>
 
 <div class="box why"><span class="k">Why paths are resolved this way</span>
-<p><code>project_paths.py</code> computes the repository root once from the file's own location
+<p><code>project_paths.py</code> computes the repository root once from its own location
 (<code>Path(__file__).resolve().parents[2]</code>) and exports every output folder from it. Nothing
 in the package depends on the directory you happen to be standing in when you type the command.</p></div>
 
@@ -376,24 +373,23 @@ in the package depends on the directory you happen to be standing in when you ty
 <h2 id="sec4"><span class="sec-no">04</span>Data in &mdash; <code>data_access/loader.py</code></h2>
 
 <div class="box gist"><span class="k">In plain words</span>
-<p>Read the option chain and the daily closing prices. Prefer the files already sitting in
-<code>data/raw/</code>; only reach for the database if those files are missing or fail their
-integrity checks.</p></div>
+<p>Read the option chain and daily closing prices. Use the files in <code>data/raw/</code> first;
+use the database only if they are missing or fail integrity checks.</p></div>
 
 <div class="box def"><span class="k">What it does</span>
-<p><b>Input:</b> a symbol, a start and end date, and the <code>[cache]</code> settings.
-<b>Output:</b> two DataFrames &mdash; options with nine columns, prices with <code>date</code> and
-<code>close</code>. <b>Role:</b> the only place in the repository that touches storage. Everything
-downstream receives clean frames and never knows where they came from.</p></div>
+<p><b>Input:</b> a symbol, start and end dates, and the <code>[cache]</code> settings.
+<b>Output:</b> two DataFrames (tables of rows and columns): options with nine columns, and prices with <code>date</code> and
+<code>close</code>. <b>Role:</b> the only code that accesses storage. Downstream code receives
+clean frames and does not need to know their source.</p></div>
 
-<p>The offline check is not just "does the file exist". <code>_build_cache_validation_result</code>
-runs four gates in order and stops at the first failure:</p>
+<p>The offline check asks more than whether the file exists. <code>_build_cache_validation_result</code>
+runs four checks in order and stops at the first failure:</p>
 
 <ol>
-  <li><b>Version</b> &mdash; the sidecar's <code>metadata_version</code> must equal the configured one.</li>
-  <li><b>Schema</b> &mdash; the sidecar's column list, the Parquet file's column list and their data types must all agree, and each type must be on an allow-list.</li>
-  <li><b>Row count</b> &mdash; the sidecar's recorded count must equal the actual number of rows.</li>
-  <li><b>Date coverage</b> &mdash; the sidecar's recorded first and last date must match the file, and must span the whole window you asked for.</li>
+  <li><b>Version</b> &mdash; the sidecar's <code>metadata_version</code> must match the configured version.</li>
+  <li><b>Schema</b> &mdash; the sidecar and Parquet column lists and data types must agree, and each type must be allowed.</li>
+  <li><b>Row count</b> &mdash; the count in the sidecar must equal the actual row count.</li>
+  <li><b>Date coverage</b> &mdash; the sidecar's first and last dates must match the file and cover the requested window.</li>
 </ol>
 
 <div class="box data"><span class="k">Sample data</span>
@@ -412,50 +408,48 @@ runs four gates in order and stops at the first failure:</p>
 2010-01-04  2010-02-03    c  1060.0 0.101274   0.5   30</pre>
 <p class="fnote">78,240 rows over 3,912 trade dates &mdash; exactly 20 rows per day.</p></div>
 </div>
-<p>Prices load as 3,912 rows from 2010-01-04 to 2024-12-31, columns <code>date</code>
+<p>Prices load as 3,912 rows from 2010-01-04 to 2024-12-31 with columns <code>date</code>
 (<code>datetime64[us]</code>) and <code>close</code> (<code>float64</code>).</p></div>
 
 <div class="box why"><span class="k">Why the duplicate rule is written this way</span>
-<p>SPX and SPXW are two ticker symbols for overlapping contracts. <code>_normalize_options_dataframe</code>
+<p>SPX and SPXW are ticker symbols for overlapping contracts. <code>_normalize_options_dataframe</code>
 sorts by <code>(trade_date, expiry_date, option_type, strike_price, open_interest)</code> with open
-interest <b>descending</b>, then keeps the first row of each group. So when two feeds disagree
-about the same contract, the more heavily held one wins, which is the better-quoted one.</p></div>
+interest <b>descending</b>, then keeps the first row in each group. If two feeds disagree about
+one contract, the row with greater open interest wins because it is usually better quoted.</p></div>
 
 <div class="box warn"><span class="k">Trap</span>
-<p>The database fallback is wrapped so that a failure produces a message naming the exact folder,
-the exact filenames and the underlying database error, rather than a bare connection stack trace.
-That matters because the common failure is a fresh clone with a valid cache and no <code>.env</code>,
-and the message has to tell you that nothing is actually wrong.</p></div>
+<p>The database fallback reports the exact folder, filenames, and database error instead of only a
+connection stack trace. This helps when a fresh clone has a valid cache but no <code>.env</code>:
+the message shows that the repository itself is fine.</p></div>
 
 
 <h2 id="sec5"><span class="sec-no">05</span>Features &mdash; <code>features/surface.py</code></h2>
 
 <div class="box gist"><span class="k">In plain words</span>
-<p>Squash a whole day's option chain down to seven numbers: how expensive insurance is, how much
-more expensive downside insurance is than upside, how curved the pricing is across strikes, and
-how the price of insurance changes as you go further out in time.</p></div>
+<p>Reduce each day's option chain to seven numbers: the cost of insurance, the difference between
+downside and upside protection, the curvature across strikes, and the change in insurance cost
+with time to expiry.</p></div>
 
 <div class="box def"><span class="k">What it does</span>
 <p><b>Input:</b> the cleaned options frame. <b>Output:</b> a DataFrame indexed by
 <code>trade_date</code> with seven float columns, in this order:
 <code>atm_iv_near</code>, <code>skew_near</code>, <code>butterfly_near</code>,
 <code>atm_iv_mid</code>, <code>skew_mid</code>, <code>butterfly_mid</code>, <code>term_slope</code>.
-<b>Role:</b> this is the state vector that every regime model clusters on.</p></div>
+<b>Role:</b> every regime model clusters this feature vector.</p></div>
 
 <h4>How it works</h4>
-<p>For each trade date, <code>_select_expiry</code> picks one near-term expiry (the one whose days
-to expiry is closest to 30, from within the 15&ndash;45 window) and one mid-term expiry (closest to
-90, within 45&ndash;120). For each of those two expiries, <code>_extract_features_one_expiry</code>
-reads three numbers off the chain by interpolating in delta space. The seventh feature is simply
-the difference between the two at-the-money readings.</p>
+<p>For each trade date, <code>_select_expiry</code> picks one near-term expiry: the one closest to
+30 days within the 15&ndash;45 window. It also picks one mid-term expiry closest to 90 days within
+45&ndash;120. For each expiry, <code>_extract_features_one_expiry</code> obtains three values by
+interpolating across delta. The seventh feature is the difference between the two at-the-money values.</p>
 
 <div class="box def"><span class="k">The formula</span>
 <p>Let $\sigma(\Delta)$ be implied volatility at delta $\Delta$, read off one expiry's chain.
 Between two quoted strikes it is interpolated in a straight line:</p>
 <p>$$\sigma(\Delta)=\sigma_{\text{lo}}+\bigl(\sigma_{\text{hi}}-\sigma_{\text{lo}}\bigr)\cdot
 \frac{\Delta-\Delta_{\text{lo}}}{\Delta_{\text{hi}}-\Delta_{\text{lo}}}$$</p>
-<p>The four features per expiry, with $a$ the setting <code>atm_delta</code> and $w$ the setting
-<code>wing_delta</code>:</p>
+<p>The four features per expiry use $a$, the <code>atm_delta</code> setting, and $w$, the
+<code>wing_delta</code> setting:</p>
 <p>$$\begin{aligned}
 \mathrm{atm\_iv} &amp;= \sigma(-a) \\
 \text{skew} &amp;= \sigma(-w)-\sigma(+w) \\
@@ -463,13 +457,13 @@ Between two quoted strikes it is interpolated in a straight line:</p>
 \mathrm{term\_slope} &amp;= \mathrm{atm\_iv}_{\text{mid}}-\mathrm{atm\_iv}_{\text{near}}
 \end{aligned}$$</p>
 <p class="fnote">$\Delta_{\text{lo}}$ and $\Delta_{\text{hi}}$ are the quoted deltas immediately
-below and above the one requested, and $\sigma_{\text{lo}},\sigma_{\text{hi}}$ their implied
-volatilities. Negative deltas are puts, positive are calls, so $\sigma(-a)$ is read off the put
-side and $\sigma(+w)$ off the call side. <b>Skew</b> is positive when downside protection costs
-more than upside, which is the normal shape for equity indices. <b>Butterfly</b> is positive when
-the wings cost more than a straight line between them would suggest, meaning the market is paying
-extra for large moves in either direction. <b>Term slope</b> is positive when longer-dated
-insurance costs more than short-dated, the calm-market shape.</p></div>
+below and above the requested value; $\sigma_{\text{lo}},\sigma_{\text{hi}}$ are their implied
+volatilities. Negative deltas are puts and positive deltas are calls, so $\sigma(-a)$ is
+read from puts and $\sigma(+w)$ from calls. <b>Skew</b> is positive when downside protection costs
+more than upside protection, the usual equity-index shape. <b>Butterfly</b> is positive when the
+wings cost more than a straight line between them suggests, meaning the market charges extra for
+large moves in either direction. <b>Term slope</b> is positive when longer-dated insurance costs
+more than short-dated insurance.</p></div>
 
 <div class="box data"><span class="k">Sample data</span>
 <div class="io">
@@ -491,22 +485,22 @@ skew_near = 0.164533 - 0.125845 = 0.038688</pre></div>
 skew_mid=0.0385, butterfly_mid=0.0065, term_slope=0.0274</code>.</p></div>
 
 <div class="box why"><span class="k">Why delta space and not strike space</span>
-<p>A strike of 1,060 means something completely different in 2010 than in 2024. A delta of $-0.50$
-means the same thing in both. Working in delta makes the seven features comparable across the whole
-sample, which is the only reason clustering fifteen years of days together is defensible at all.</p></div>
+<p>A strike of 1,060 means something different in 2010 and 2024. A delta of $-0.50$ has the same
+meaning in both years. Using delta makes the seven features comparable across the sample, which
+makes clustering fifteen years of days defensible.</p></div>
 
 <div class="box warn"><span class="k">Trap</span>
-<p><code>interpolate_iv_at_delta</code> returns <code>NaN</code> rather than extrapolating when the
-requested delta lies outside the quoted range. That is the right choice &mdash; extrapolated wing
-volatility is fiction &mdash; but it means a thin chain silently produces a blank feature row, which
-both pipelines then drop. A run that quietly loses a third of its days looks identical to a run that
-loses none unless you check the log line <code>Feature extraction complete: N days, M valid</code>.</p></div>
+<p><code>interpolate_iv_at_delta</code> returns <code>NaN</code> instead of extrapolating outside the
+quoted range. That avoids inventing wing volatility, but a thin chain then produces a blank feature
+row, which both pipelines drop. Check the log line
+<code>Feature extraction complete: N days, M valid</code>; otherwise a run that loses many days can
+look like one that loses none.</p></div>
 
 <h4>The feature-set registry</h4>
-<p><code>FEATURE_SET_REGISTRY</code> names five fixed column subsets so an experiment can be
-requested by name. <code>select_feature_columns</code> looks the name up, checks every required
-column is present, and returns them in registry order. Order matters: several downstream steps
-locate the at-the-money column by position.</p>
+<p><code>FEATURE_SET_REGISTRY</code> names five fixed column subsets. An experiment requests one by
+name. <code>select_feature_columns</code> checks that every required column exists and returns the
+columns in registry order. The order matters because some later steps find the at-the-money column
+by position.</p>
 
 <div class="scroll">
 <table>
@@ -525,15 +519,15 @@ locate the at-the-money column by position.</p>
 <h2 id="sec6"><span class="sec-no">06</span>The forecast target &mdash; <code>walkforward/targets.py</code></h2>
 
 <div class="box gist"><span class="k">In plain words</span>
-<p>For every trading day, work out how volatile the index actually turned out to be over the
-following twenty trading days. That is the thing every model is trying to guess.</p></div>
+<p>For each trading day, measure the index's volatility over the following twenty trading days.
+That is the value every model forecasts.</p></div>
 
 <div class="box def"><span class="k">What it does</span>
-<p><b>Input:</b> the price frame, the feature frame (used only for its index and its
-<code>atm_iv_near</code> column), a horizon $h$ and an annualization factor $A$.
+<p><b>Input:</b> the price frame, the feature frame (used only for its index and
+<code>atm_iv_near</code> column), a horizon $h$, and an annualization factor $A$.
 <b>Output:</b> a frame on the feature index with <code>realized_vol</code>,
-<code>variance_risk_premium</code> and <code>forward_return</code>. <b>Role:</b> supplies the
-"right answer" that every forecast is scored against.</p></div>
+<code>variance_risk_premium</code>, and <code>forward_return</code>. <b>Role:</b> supplies the
+actual values used to score each forecast.</p></div>
 
 <div class="box def"><span class="k">The formula</span>
 <p>$$r_t=\log\!\left(\frac{P_t}{P_{t-1}}\right)$$</p>
@@ -542,11 +536,11 @@ following twenty trading days. That is the thing every model is trying to guess.
 \mathrm{fwd\_ret}_t=\frac{P_{t+h}}{P_t}-1$$</p>
 <p class="fnote">$P_t$ is the closing index level on trading day $t$; $r_t$ is that day's log
 return; $h$ is the horizon in trading days (default 20); $A$ is trading days per year (252);
-$\operatorname{std}$ is the ordinary sample standard deviation with $h-1$ in the denominator, which
-is what <code>pandas.rolling().std()</code> computes; $\sigma^{\mathrm{ATM}}_t$ is
-<code>atm_iv_near</code> on day $t$. The <b>variance risk premium</b> here is the ex-post gap
-between what the market charged for volatility and what volatility turned out to be &mdash; positive
-means insurance was expensive relative to what happened.</p></div>
+$\operatorname{std}$ is the sample standard deviation with $h-1$ in the denominator, which is
+what <code>pandas.rolling().std()</code> computes; $\sigma^{\mathrm{ATM}}_t$ is
+<code>atm_iv_near</code> on day $t$. The <b>variance risk premium</b> is the gap between the
+volatility price and the volatility that occurred. A positive value means insurance cost more
+than the subsequent realized volatility.</p></div>
 
 <h4>The one line that does the alignment</h4>
 <pre>log_returns = np.log(close_series / close_series.shift(1))
@@ -557,11 +551,10 @@ annualized_vol = rolling_std * np.sqrt(float(annualization))
 <span class="c"># of the forward-looking window.</span>
 forward_realized_vol = annualized_vol.shift(-horizon)</pre>
 
-<p><code>rolling(20).std()</code> naturally produces a <b>backward</b>-looking number: on day $t$
-it is the standard deviation of $r_{t-19}\ldots r_t$. Shifting by $-20$ moves that value 20 rows
-earlier, so it now sits on day $t-20$ and describes $r_{t-19}\ldots r_t$, which are the twenty
-returns <i>after</i> $t-20$. Renaming the index, the value on day $t$ describes
-$r_{t+1}\ldots r_{t+h}$, exactly as the formula says.</p>
+<p><code>rolling(20).std()</code> produces a <b>backward</b>-looking value: on day $t$ it is the
+standard deviation of $r_{t-19}\ldots r_t$. Shifting by $-20$ moves it 20 rows earlier, to day
+$t-20$, where it describes $r_{t-19}\ldots r_t$, the twenty returns <i>after</i> $t-20$. After
+renaming the index, the value on day $t$ describes $r_{t+1}\ldots r_{t+h}$, as required.</p>
 
 <div class="box data"><span class="k">Sample data</span>
 <div class="io">
@@ -578,24 +571,23 @@ $r_{t+1}\ldots r_{t+h}$, exactly as the formula says.</p>
    ...
 2024-12-31           NaN     NaN        NaN  &lt;- no future left</pre></div>
 </div>
-<p>Hand check of the first row: the standard deviation of the next twenty log returns after
+<p>For the first row, the standard deviation of the next twenty log returns after
 2010-01-04 is <code>0.011450</code>; <code>0.011450 &times; sqrt(252) = 0.18176</code>, which is what
 the function returned. The last <b>20</b> rows are <code>NaN</code>, exactly one horizon's worth.</p></div>
 
 <div class="box warn"><span class="k">Trap</span>
-<p>Because the target is built by shifting, the last $h$ rows of the panel have no answer and are
-dropped later by <code>dropna()</code>. Sizing checks must use the number of rows that survive that
-drop, not the number of feature rows. Getting this wrong is how a walk-forward run silently produces
-an empty file, which is a mistake this repository has already made once and now guards against
-explicitly.</p></div>
+<p>Because the target is shifted, the last $h$ rows have no answer and are later dropped by
+<code>dropna()</code>. Capacity checks must use the rows that survive, not the number of feature
+rows. Using the larger count can make a walk-forward run write an empty file; the repository now
+checks for this explicitly.</p></div>
 
 
 <h2 id="sec7"><span class="sec-no">07</span>Splits and the embargo &mdash; <code>walkforward/splits.py</code> and the engine</h2>
 
 <div class="box gist"><span class="k">In plain words</span>
-<p>March forward through the calendar. Train on everything before today, forecast the next five
-days, then move the wall forward five days and repeat. Then throw away the most recent training
-days, because their answers were not known yet on the day you are pretending to stand.</p></div>
+<p>Move through the calendar. Train on data before today, forecast the next five days, move forward
+five days, and repeat. Then remove the most recent training days because their outcomes were not
+known on the forecast date.</p></div>
 
 <h4>Step one: the plain chronological split</h4>
 <pre>splits: list[WalkForwardSplit] = []
@@ -613,8 +605,8 @@ while train_end &lt; len(dates):
     <span class="c"># Expand the history by the same stride used for testing.</span>
     train_end = test_end</pre>
 
-<p>This is an <b>expanding window</b>: the training set only ever grows. A rolling-window builder
-with a fixed-length history also exists in the same file, but the engine does not currently use it.</p>
+<p>This is an <b>expanding window</b>: the training set only grows. The same file also contains a
+fixed-length rolling-window builder, but the engine does not use it.</p>
 
 <h4>Step two: the embargo, which is the part that matters</h4>
 
@@ -622,19 +614,17 @@ with a fixed-length history also exists in the same file, but the engine does no
 <p>Let $i(d)$ be the position of date $d$ in the full sorted price history, $h$ the horizon, and
 $s$ the first date of the test block. A training row at date $t$ is kept only when</p>
 <p>$$i(t)+h \;&lt;\; i(s)$$</p>
-<p class="fnote">The label at $t$ is built from returns $r_{t+1}\ldots r_{t+h}$, so the last price it
-touches sits at position $i(t)+h$. Requiring that position to fall <b>strictly before</b> $i(s)$
-means no training label uses a price observed on or after the first day being forecast. Positions
-come from the price calendar, not the feature calendar, so a gap in the option data cannot quietly
-shrink the gap.</p></div>
+<p class="fnote">The label at $t$ uses returns $r_{t+1}\ldots r_{t+h}$, so its last price is at
+position $i(t)+h$. Requiring that position to be <b>strictly before</b> $i(s)$ prevents a training
+label from using a price observed on or after the first forecast day. Positions come from the price
+calendar, not the feature calendar, so missing option data cannot narrow the gap.</p></div>
 
 <div class="box why"><span class="k">Why chronological ordering is not enough on its own</span>
-<p>This is the single most important idea in the repository. Suppose you train up to Friday and
-forecast the following Monday. The training row dated Friday carries a label describing the next
-twenty trading days &mdash; which include that Monday and the three weeks after it. Training on it
-means the model has already seen the answer to the question you are about to ask. The split looks
-perfectly chronological and is still contaminated. The embargo deletes the last $h$ training rows
-to close the overlap.</p></div>
+<p>This is the key idea in the repository. Suppose training ends on Friday and the forecast starts
+on Monday. Friday's label describes the next twenty trading days, including Monday and the three
+weeks after it. Training on Friday would give the model part of the answer in advance. The split is
+chronological but still contaminated. The embargo removes the last $h$ training rows to prevent
+that overlap.</p></div>
 
 <div class="box data"><span class="k">Sample data</span>
 <div class="io">
@@ -651,50 +641,49 @@ first test date  : 2019-09-30   position 2540
 2519 + 20 = 2539  &lt;  2540   -> kept</pre>
 <p class="fnote">The gap is 20 price days wide, not 20 calendar days.</p></div>
 </div>
-<p>Across the whole SPX panel of 3,872 aligned rows, the builder proposes <b>271</b> splits; after
-the embargo, <b>267</b> of them still have the required 2,520 safe labels, so the first forecast
-lands on <b>2019-10-28</b> rather than 2019-09-30. Those 267 splits carry <b>1,332</b> forecast dates
-per model: 266 full blocks of five, plus a final short block of two, because the panel runs out of
-dates before the last stride completes. 1,332 is the count in
+<p>Across the SPX panel's 3,872 aligned rows, the builder proposes <b>271</b> splits. After the
+embargo, <b>267</b> still have the required 2,520 safe labels, so the first forecast is
+<b>2019-10-28</b>, not 2019-09-30. Those 267 splits contain <b>1,332</b> forecast dates per model:
+266 full blocks of five and a final block of two because the panel ends before the last stride
+completes. 1,332 is the count in
 <code>outputs/reports/walkforward/metric_summary.csv</code>.</p></div>
 
 <div class="box warn"><span class="k">Trap</span>
-<p><code>min_train_size</code> is checked <b>after</b> the embargo, not before. The split builder is
-handed the same number, so the first few splits are always proposed and then immediately skipped
-because they are short by roughly $h$ rows. This is why the first forecast date is about a month
-later than the naive arithmetic suggests. Before any model is fitted,
+<p><code>min_train_size</code> is checked <b>after</b> the embargo. The split builder receives the
+same number, so the first splits are proposed and then skipped because they lack roughly $h$ rows.
+That is why the first forecast date is about a month later than simple arithmetic suggests. Before
+fitting any model,
 <code>_maximum_safe_train_size</code> puts the last row in a one-row test set and measures the
 largest embargoed training set that could ever exist; if that is smaller than
 <code>min_train_size</code>, the run raises a <code>ValueError</code> naming the symbol, horizon,
-feature set, aligned row count, maximum and requested minimum &mdash; rather than writing an empty
-CSV.</p></div>
+feature set, aligned row count, maximum, and requested minimum instead of writing an empty CSV.</p></div>
 
 
 <h2 id="sec8"><span class="sec-no">08</span>The regime models &mdash; <code>regimes/latent_models.py</code></h2>
 
 <div class="box gist"><span class="k">In plain words</span>
-<p>Given a cloud of daily feature vectors, find a small number of overlapping blobs that describe
-the cloud well, and label each day with the blob it most likely came from. Then rename the blobs so
-that number 0 is always the calmest one.</p></div>
+<p>Given daily feature vectors, find a small number of overlapping groups that describe the data and
+assign each day to the group it most likely belongs to. Then rename the groups so that 0 is always
+the calmest one.</p></div>
 
 <h4>The Gaussian Mixture Model &mdash; <code>fit_gmm</code></h4>
 
 <div class="box def"><span class="k">The model</span>
-<p>Each standardized daily feature vector $x_t\in\mathbb{R}^d$ is assumed to be drawn from one of
+<p>Each standardized (rescaled to a common scale) daily feature vector $x_t\in\mathbb{R}^d$ is assumed to be drawn from one of
 $K$ multivariate normal distributions, but you are not told which:</p>
 <p>$$p(x_t\mid\theta)=\sum_{k=1}^{K}\pi_k\,\mathcal{N}\!\bigl(x_t\mid\mu_k,\Sigma_k\bigr)$$</p>
-<p class="fnote">$K$ is the number of regimes; $\pi_k$ is the share of days belonging to regime $k$,
-with $\sum_k\pi_k=1$; $\mu_k$ is that regime's average feature vector; $\Sigma_k$ is its
-$d\times d$ covariance matrix (the code uses <code>covariance_type="full"</code>, so every regime
-gets its own unrestricted shape); $\mathcal{N}$ is the multivariate normal density;
-$\theta=\{\pi_k,\mu_k,\Sigma_k\}$ is the whole parameter set. Days are treated as independent
-draws &mdash; the model has no notion of yesterday.</p></div>
+<p class="fnote">$K$ is the number of regimes; $\pi_k$ is the share of days in regime $k$, with
+$\sum_k\pi_k=1$; $\mu_k$ is the regime's average feature vector; $\Sigma_k$ is its
+$d\times d$ covariance matrix (the code uses <code>covariance_type="full"</code>, so each regime
+has its own unrestricted shape); $\mathcal{N}$ is the multivariate normal density; and
+$\theta=\{\pi_k,\mu_k,\Sigma_k\}$ is the full parameter set. The model treats days as
+independent, so it has no notion of yesterday.</p></div>
 
 <div class="box def"><span class="k">The objective it maximizes</span>
 <p>$$\ell(\theta)=\sum_{t=1}^{n}\log\sum_{k=1}^{K}\pi_k\,\mathcal{N}\!\bigl(x_t\mid\mu_k,\Sigma_k\bigr)$$</p>
-<p class="fnote">$n$ is the number of training days. This is the log-likelihood: how probable the
-observed data is under the parameters. There is no closed-form maximum because you do not know which
-regime produced each day, so it is maximized iteratively.</p></div>
+<p class="fnote">$n$ is the number of training days. The log-likelihood measures how probable the
+observed data is under the parameters. Because the regime for each day is unknown, the maximum is
+found iteratively rather than from a single formula.</p></div>
 
 <div class="box def"><span class="k">The update the loop performs (expectation-maximization)</span>
 <p><b>E step</b> &mdash; given the current parameters, work out how much each day belongs to each
@@ -706,22 +695,22 @@ regime:</p>
 \pi_k=\frac{n_k}{n},\qquad
 \mu_k=\frac{1}{n_k}\sum_{t=1}^{n}\gamma_{tk}\,x_t$$</p>
 <p>$$\Sigma_k=\frac{1}{n_k}\sum_{t=1}^{n}\gamma_{tk}\,(x_t-\mu_k)(x_t-\mu_k)^{\top}$$</p>
-<p class="fnote">$\gamma_{tk}$ is the responsibility of regime $k$ for day $t$, a number between 0
-and 1 with $\sum_k\gamma_{tk}=1$; $n_k$ is the effective number of days in regime $k$; $\top$ is
-matrix transpose. The two steps alternate until the log-likelihood stops rising. Each step is
-guaranteed not to lower the log-likelihood, but the result depends on where you start, which is why
-the code passes <code>n_init=5</code> and <code>random_state=42</code> &mdash; five starting points,
-best one kept, same answer every run.</p></div>
+<p class="fnote">$\gamma_{tk}$ is the responsibility of regime $k$ for day $t$, a number from 0
+to 1 with $\sum_k\gamma_{tk}=1$; $n_k$ is the effective number of days in regime $k$; and $\top$
+means matrix transpose. The steps alternate until the log-likelihood stops rising. Each step cannot
+lower it, but the result depends on the starting point. That is why the code uses
+<code>n_init=5</code> and <code>random_state=42</code>: five starting points, with the best fit kept
+and the same answer on every run.</p></div>
 
 <div class="box def"><span class="k">Choosing the number of regimes</span>
 <p>The code fits every $K$ from <code>min_k</code> to <code>max_k</code> and keeps the one with the
 lowest Bayesian information criterion:</p>
 <p>$$\mathrm{BIC}(K)=p_K\log n-2\,\ell_K,\qquad
 p_K=(K-1)+Kd+K\frac{d(d+1)}{2}$$</p>
-<p class="fnote">$\ell_K$ is the best log-likelihood reached with $K$ regimes; $p_K$ counts the free
-parameters &mdash; $K-1$ mixing weights, $Kd$ mean entries, and $K$ symmetric covariance matrices of
-$d(d+1)/2$ distinct entries each. The $p_K\log n$ term is a fine for complexity, so extra regimes
-must earn their keep. Lower is better.</p></div>
+<p class="fnote">$\ell_K$ is the best log-likelihood reached with $K$ regimes. $p_K$ counts the free
+parameters: $K-1$ mixing weights, $Kd$ mean entries, and $K$ symmetric covariance matrices with
+$d(d+1)/2$ distinct entries each. The $p_K\log n$ term penalizes complexity, so extra regimes
+must improve the fit enough to justify themselves. Lower is better.</p></div>
 
 <div class="box data"><span class="k">Sample data</span>
 <div class="io stack">
@@ -731,8 +720,8 @@ must earn their keep. Lower is better.</p></div>
 3       29          227.13   -14370.89        7299.01     &lt;- fits 2.36 better, costs 78 more
 
 selected K = 2</pre>
-<p class="fnote">Going from two regimes to three raises the log-likelihood by only 2.36 while adding
-ten parameters worth 78.3 of penalty, so the criterion keeps two. Check:
+<p class="fnote">Going from two regimes to three raises the log-likelihood by only 2.36 but adds
+ten parameters and a penalty of 78.3, so the criterion keeps two. Check:
 $19\times\log(2520)=19\times7.832=148.81$, and $148.81-(-14444.49)=14593.30$, half of which is
 7296.65.</p></div>
 </div></div>
@@ -740,28 +729,27 @@ $19\times\log(2520)=19\times7.832=148.81$, and $148.81-(-14444.49)=14593.30$, ha
 <h4>The Hidden Markov Model &mdash; <code>fit_hmm</code></h4>
 
 <div class="box def"><span class="k">The model, its objective, and its update</span>
-<p><b>Model.</b> A hidden state $z_t\in\{1,\ldots,K\}$ moves according to a transition matrix, and
-the observed features are normal around that state's mean:</p>
+<p><b>Model.</b> A hidden state $z_t\in\{1,\ldots,K\}$ moves according to a transition matrix.
+The observed features are normally distributed around that state's mean:</p>
 <p>$$\Pr(z_{t+1}=j\mid z_t=i)=A_{ij},\qquad
 x_t\mid z_t=k\;\sim\;\mathcal{N}(\mu_k,\Sigma_k)$$</p>
-<p><b>Objective.</b> The same idea as before, but the sum now runs over whole state paths:</p>
+<p><b>Objective.</b> The same idea as before, but the sum runs over complete state paths:</p>
 <p>$$\ell(\theta)=\log\sum_{z_1,\ldots,z_T}\Pr\bigl(z_1,\ldots,z_T,\;x_1,\ldots,x_T\mid\theta\bigr)$$</p>
-<p><b>Update (Baum-Welch, which is expectation-maximization for this model).</b> A
+<p><b>Update (Baum-Welch, the expectation-maximization method for this model).</b> A
 forward-backward pass gives $\gamma_t(k)=\Pr(z_t=k\mid x_{1:T})$ and
-$\xi_t(i,j)=\Pr(z_t=i,z_{t+1}=j\mid x_{1:T})$; the parameters are then re-estimated as</p>
+$\xi_t(i,j)=\Pr(z_t=i,z_{t+1}=j\mid x_{1:T})$. The parameters are then re-estimated as</p>
 <p>$$A_{ij}=\frac{\sum_{t=1}^{T-1}\xi_t(i,j)}{\sum_{t=1}^{T-1}\gamma_t(i)},\qquad
 \mu_k=\frac{\sum_{t=1}^{T}\gamma_t(k)\,x_t}{\sum_{t=1}^{T}\gamma_t(k)}$$</p>
 <p class="fnote">$T$ is the sequence length; $A_{ij}$ is the probability of moving from state $i$ to
-state $j$ in one day; $\gamma_t(k)$ is the probability that day $t$ was in state $k$;
-$\xi_t(i,j)$ the probability that day $t$ was in $i$ and day $t+1$ in $j$. Both quantities condition
-on the <b>whole</b> sequence $x_{1:T}$, including days after $t$. That word "whole" is the source of
-the look-ahead problem discussed in <a href="#sec18">limitations</a>.</p></div>
+state $j$ in one day; $\gamma_t(k)$ is the probability that day $t$ was in state $k$; and
+$\xi_t(i,j)$ is the probability that day $t$ was in $i$ and day $t+1$ was in $j$. Both quantities
+use the <b>whole</b> sequence $x_{1:T}$, including days after $t$. That creates the look-ahead
+problem discussed in <a href="#sec18">limitations</a>.</p></div>
 
-<p>The code runs the fit <code>n_restarts</code> times with different random seeds, scores each on
-in-sample log-likelihood, and keeps the best. Restarts that blow up are logged as warnings and
-skipped; if every restart fails it raises <code>RuntimeError</code>. Labels come from Viterbi
-decoding, which returns the single most likely state path rather than the most likely state on each
-day independently.</p>
+<p>The code fits the model <code>n_restarts</code> times with different random seeds, scores each fit
+by in-sample log-likelihood, and keeps the best. Failed restarts are logged as warnings and skipped;
+if all fail, it raises <code>RuntimeError</code>. Labels come from Viterbi decoding, which returns
+the most likely complete state path rather than the most likely state for each day independently.</p>
 
 <div class="box warn"><span class="k">Trap: most of those restarts do not survive</span>
 <p>The <code>except Exception</code> around each restart is doing far more work than it looks. Running
@@ -773,22 +761,20 @@ HMM restart 4 failed: 'covars' must be symmetric, positive-definite
 HMM restart 5 failed: 'covars' must be symmetric, positive-definite
 HMM restart 7 failed: 'covars' must be symmetric, positive-definite
 HMM restart 9 failed: 'covars' must be symmetric, positive-definite</pre>
-<p><b>Six of the ten restarts collapse</b>, and two of the four that survive also log
-<code>Model is not converging</code>. The final answer rests on a handful of runs. Nothing in the
-output files records this &mdash; it appears only as warnings on the console. Setting
-<code>hmm_random_restarts</code> lower would not obviously fail; it would just quietly pick from a
-smaller pool, and could land on a different five-state story. The run is still deterministic, because
-the seed for restart $i$ is $i$, so the same settings give the same answer every time.</p></div>
+<p><b>Six of the ten restarts collapse</b>, and two of the four survivors also log
+<code>Model is not converging</code>. The final result therefore comes from only a few fits. The
+output files do not record this; it appears only as console warnings. Lowering
+<code>hmm_random_restarts</code> would reduce the pool and could select a different five-state result.
+The run remains deterministic because restart $i$ uses seed $i$.</p></div>
 
 <h4>Fixing label switching &mdash; <code>order_regimes_by_volatility</code></h4>
 
 <div class="box why"><span class="k">Why this function has to exist</span>
-<p>Nothing forces a clustering model to call the calm blob "0". Refit the same data with a different
-random seed and the same blob might come back as "1". Any statistic reported per label would then be
-meaningless across fits. This function computes each label's average standardized
-<code>atm_iv_near</code>, sorts them, and renumbers so <b>0 is always the lowest-volatility
-regime</b>. Only after this renaming is a regime label comparable across splits, across symbols and
-across runs.</p></div>
+<p>A clustering model is free to call the calm group "0" or "1". Refit the same data with another
+seed and the labels may swap, making label-based statistics hard to compare. This function computes
+each label's average standardized <code>atm_iv_near</code>, sorts the labels, and renumbers them so
+<b>0 is always the lowest-volatility regime</b>. Only then are labels comparable across splits,
+symbols, and runs.</p></div>
 
 <div class="box data"><span class="k">Sample data</span>
 <div class="io">
@@ -799,30 +785,30 @@ across runs.</p></div>
 <div><span class="lab">out &mdash; after ordering</span>
 <pre>ordered 0  &lt;- was raw 1  (calm, 0.1182)
 ordered 1  &lt;- was raw 0  (stressed, 0.1829)</pre>
-<p class="fnote">The model happened to number them backwards; the mapping flips them.</p></div>
+<p class="fnote">The model numbered them in the opposite order, so the mapping swaps them.</p></div>
 </div></div>
 
 
 <h2 id="sec9"><span class="sec-no">09</span>The five forecast rules &mdash; <code>walkforward/models.py</code></h2>
 
 <div class="box gist"><span class="k">In plain words</span>
-<p>Five ways of answering "how volatile will the next month be?", ranging from "just read today's
-option price" to "figure out which regime we are in and use that regime's historical average".</p></div>
+<p>Five ways to answer “how volatile will the next month be?”, from today's option price to the
+historical average for today's regime.</p></div>
 
 <div class="scroll">
 <table>
 <thead><tr><th>Row name</th><th>Rule</th><th>Uses</th><th>Why it is in the panel</th></tr></thead>
 <tbody>
 <tr><td><code>atm_iv</code></td><td>$\hat y_t=\sigma^{\mathrm{ATM}}_t$</td><td>today's option price only</td>
-<td>The market's own published forecast. The obvious thing to beat.</td></tr>
+<td>The market's own forecast: the basic result to beat.</td></tr>
 <tr><td><code>historical_mean</code></td><td>$\hat y_t=\dfrac{1}{|\mathcal{T}_t|}\sum_{u\in\mathcal{T}_t}y_u$</td><td>past labels only</td>
-<td>The hardest benchmark to beat and the easiest to forget. If a clever model cannot beat a flat line, it has added nothing.</td></tr>
+<td>The hardest benchmark to beat. If a complex model cannot beat a flat line, it adds nothing.</td></tr>
 <tr><td><code>trailing_realized_vol</code></td><td>$\hat y_t=\operatorname{std}(r_{t-h+1..t})\sqrt{A}$</td><td>past prices only</td>
-<td>Tests whether volatility simply persists.</td></tr>
+<td>Tests whether recent volatility persists.</td></tr>
 <tr><td><code>linear_features</code></td><td>ordinary least squares on the selected features</td><td>past features and labels</td>
-<td>Tests whether the surface helps at all, before any regime machinery.</td></tr>
+<td>Tests whether the surface helps before using regimes.</td></tr>
 <tr><td><code>gmm_regime_mean</code></td><td>$\hat y_t=\bar y^{(\hat z_t)}$</td><td>past features and labels</td>
-<td>The actual research claim.</td></tr>
+<td>Tests the project's main claim.</td></tr>
 </tbody>
 </table>
 </div>
@@ -832,10 +818,10 @@ option price" to "figure out which regime we are in and use that regime's histor
 \sum_{u\in\mathcal{T}_t,\;\hat z_u=\hat z_t}y_u$$</p>
 <p class="fnote">$\mathcal{T}_t$ is the embargoed training window available on day $t$; $y_u$ is the
 realized-volatility label for training day $u$; $\hat z_u$ is the ordered regime assigned to
-training day $u$; $\hat z_t$ is the ordered regime assigned to the day being forecast. In words:
-find which regime today looks like, then predict the average outcome that followed days that looked
-like that. If today's regime cannot be mapped into the ordered space, the code falls back to the
-plain training mean and records the regime as $-1$.</p></div>
+training day $u$; and $\hat z_t$ is the ordered regime assigned to the forecast day. In practice,
+the code finds the regime that resembles today's features and predicts the average outcome after
+matching training days. If today's regime cannot be mapped, it uses the training mean and records
+the regime as $-1$.</p></div>
 
 <h4>How the block fit works</h4>
 <pre>train_feature_matrix = train_features.to_numpy(dtype=float)
@@ -848,23 +834,22 @@ standardized_test_features = fitted_scaler.transform(
 )</pre>
 
 <div class="box why"><span class="k">Why the scaler is fitted and then reused, never refitted</span>
-<p>Standardizing means subtracting a mean and dividing by a standard deviation. If those two numbers
-were computed over the training <i>and</i> test rows together, every test row would leak a little
-information about itself into the training data. Fitting on training rows only and calling
-<code>.transform()</code> on the test rows keeps the boundary intact. On the first window the fitted
-values are mean <code>[0.14023, 0.16224, 0.02202]</code> and scale
-<code>[0.03557, 0.03558, 0.00251]</code>; every test row is scaled by those, whatever it contains.</p></div>
+<p>Standardizing means subtracting the mean and dividing by the standard deviation. Computing those
+values from the training <i>and</i> test rows together would leak test information into training. Fitting on
+training rows only and calling <code>.transform()</code> on test rows preserves the boundary. In the
+first window, the fitted mean is <code>[0.14023, 0.16224, 0.02202]</code> and scale is
+<code>[0.03557, 0.03558, 0.00251]</code>; every test row uses them.</p></div>
 
 <div class="box why"><span class="k">Why one fit per block instead of one per day</span>
-<p>Every one of the five test days in a block shares exactly the same training window, so refitting
-five times would produce five identical models. Fitting once is not an approximation &mdash; it gives
-the same answer for the linear model and the mixture model, five times faster.</p></div>
+<p>All five test days in a block use the same training window, so refitting five times would produce
+the same models. One fit gives the same answer for the linear and mixture models and is five times
+faster.</p></div>
 
 <div class="box warn"><span class="k">Trap the Hidden Markov Model path avoids</span>
-<p>The mixture model can classify each test day independently, but a Markov model reads sequences,
-so it needs context. The naive shortcut is to decode the whole training block plus the whole test
-block at once. That would let Wednesday's observation influence Monday's state. Instead the code
-decodes the training sequence plus <b>one</b> test row at a time and keeps only the final state:</p>
+<p>The mixture model can classify each test day independently, but a Markov model uses sequences and
+needs context. Decoding the full training and test blocks at once would let Wednesday's observation
+influence Monday's state. The code instead decodes the training sequence plus <b>one</b> test row at
+a time and keeps only the final state:</p>
 <pre>predicted_test_labels = np.asarray(
     [
         int(
@@ -876,9 +861,9 @@ decodes the training sequence plus <b>one</b> test row at a time and keeps only 
     ],
     dtype=int,
 )</pre>
-<p>Taking element <code>[-1]</code> is what makes this safe: the last state of a Viterbi path depends
-only on observations up to and including that point, because there is nothing after it. It is slow
-&mdash; one decode per test day &mdash; and that cost is the price of the guarantee.</p></div>
+<p>Element <code>[-1]</code> makes this safe: the last state uses observations up to that point and
+has no later observation to condition on. It is slow, requiring one decode per test day, but that is
+the cost of the guarantee.</p></div>
 
 <div class="box data"><span class="k">Sample data</span>
 <div class="io stack">
@@ -900,52 +885,48 @@ only on observations up to and including that point, because there is nothing af
 actual        0.14821 0.13491 0.15318 0.15432 0.15424
 historical_mean forecast  = 0.150625
 atm_iv forecast (day one) = 0.139692</pre>
-<p class="fnote">All five days land in the same regime, so the regime forecast is flat &mdash; and it
-sits <b>0.000024 away</b> from the plain historical mean.</p></div>
+<p class="fnote">All five days land in the same regime, so the regime forecast is flat; it is
+<b>0.000024 away</b> from the plain historical mean.</p></div>
 </div>
-<p>The reason is visible in the training window: the two ordered regimes contain 1,663 and 857 days,
-their mean ATM implied volatility differs a lot (0.1182 against 0.1829), and yet their mean
-<i>realized</i> outcomes are <code>0.15065</code> and <code>0.15058</code> &mdash; effectively
-identical. Knowing the regime tells you nothing about the answer here.</p></div>
+<p>In the training window, the two ordered regimes contain 1,663 and 857 days. Their mean ATM implied
+volatility differs (0.1182 versus 0.1829), but their mean <i>realized</i> outcomes are
+<code>0.15065</code> and <code>0.15058</code>, effectively identical. Here, the regime adds no
+information about the outcome.</p></div>
 
 
 <h2 id="sec10"><span class="sec-no">10</span>The engine loop &mdash; <code>walkforward/engine.py</code></h2>
 
 <div class="box gist"><span class="k">In plain words</span>
-<p>Four nested loops: for each symbol, for each horizon, for each feature set, for each time step
-&mdash; fit, forecast, write down five rows per day.</p></div>
+<p>Four nested loops: for each symbol, horizon, feature set, and time step, fit, forecast, and write
+five rows per day.</p></div>
 
 <div class="box def"><span class="k">What it does</span>
-<p><b>Input:</b> the experiment grid and the shared config. <b>Output:</b> three files in
-<code>outputs/reports/walkforward/</code>. <b>Role:</b> the only place that decides what a "run"
-means.</p></div>
+<p><b>Input:</b> the experiment grid and shared configuration. <b>Output:</b> three files in
+<code>outputs/reports/walkforward/</code>. <b>Role:</b> defines what a run does.</p></div>
 
 <h4>The order of operations, once per symbol and horizon</h4>
 <ol>
-  <li>Load options and prices, build the seven features, drop blank rows.</li>
-  <li>Build the forward targets and the trailing-volatility benchmark on the feature index.</li>
-  <li>Join features, target and benchmark into one frame and <code>dropna()</code>. Every model now
-  sees <b>exactly the same dates</b> &mdash; this is what makes the error comparison fair.</li>
+  <li>Load options and prices, build the seven features, and drop blank rows.</li>
+  <li>Build the forward targets and trailing-volatility benchmark on the feature index.</li>
+  <li>Join features, target, and benchmark into one frame and call <code>dropna()</code>. Every model
+  then sees <b>exactly the same dates</b>, making the error comparison fair.</li>
   <li>Check capacity. If the largest possible embargoed training set is smaller than
-  <code>min_train_size</code>, raise a <code>ValueError</code> and stop before fitting anything.</li>
-  <li>Build the expanding splits; for each, apply the embargo and skip the split if too few safe
-  labels remain.</li>
-  <li>Fit the linear model and the mixture model once for the block; compute the historical mean
-  once.</li>
+  <code>min_train_size</code>, raise a <code>ValueError</code> before fitting anything.</li>
+  <li>Build expanding splits, apply the embargo to each, and skip any with too few safe labels.</li>
+  <li>Fit the linear and mixture models once per block, and compute the historical mean once.</li>
   <li>Walk the test rows and append five standardized dictionaries per row.</li>
 </ol>
 
 <div class="box why"><span class="k">Why the shared aligned panel matters more than it looks</span>
-<p>Step 3 is the difference between a real comparison and a misleading one. If the trailing-volatility
-benchmark had a few extra dates because it needs fewer inputs, it would be scored on a slightly
-different sample and its root mean squared error would not be comparable to the others. Joining first
-and dropping blanks once forces every model onto an identical date set.</p></div>
+<p>Step 3 makes the comparison fair. If the trailing-volatility benchmark had extra dates because it
+needs fewer inputs, it would be scored on a different sample and its root mean squared error would
+not be comparable. Joining first and dropping blanks once gives every model the same dates.</p></div>
 
 <div class="box warn"><span class="k">Trap</span>
 <p><code>OUTPUT_DIR</code> is a module-level global. <code>main()</code> reassigns it from
 <code>walkforward.toml</code> before calling <code>run_research</code>, and <code>run_research</code>
-reads the global rather than taking a parameter. If you import <code>run_research</code> and call it
-yourself &mdash; as the tests and the notebook do &mdash; the <code>output_dir</code> setting in
+reads the global instead of taking a parameter. If you import <code>run_research</code> and call it
+directly, as the tests and notebook do, the <code>output_dir</code> setting in
 <code>walkforward.toml</code> is ignored and results go to the default folder.</p></div>
 
 
@@ -958,42 +939,40 @@ yourself &mdash; as the tests and the notebook do &mdash; the <code>output_dir</
 \mathrm{MAE}=\frac{1}{N}\sum_{t=1}^{N}\bigl|y_t-\hat y_t\bigr|$$</p>
 <p>And, for a model $m$ against a benchmark $b$ measured on identical dates:</p>
 <p>$$R^2_{\mathrm{OOS},\,m\mid b}=1-\frac{\mathrm{MSE}_m}{\mathrm{MSE}_b}$$</p>
-<p class="fnote">$\mathrm{MSE}$ is mean squared error, $\mathrm{RMSE}$ its square root (back in
-volatility units), $\mathrm{MAE}$ mean absolute error. $R^2_{\mathrm{OOS}}$ is positive when the
-model has smaller squared error than the benchmark, zero when they tie, and negative &mdash;
-unbounded below &mdash; when the model is worse. It is not the $R^2$ of a regression and it is not
-confined to $[0,1]$.</p></div>
+<p class="fnote">$\mathrm{MSE}$ is mean squared error; $\mathrm{RMSE}$ is its square root, in
+volatility units; and $\mathrm{MAE}$ is mean absolute error. $R^2_{\mathrm{OOS}}$ is positive when
+the model's squared error is smaller than the benchmark's, zero when they tie, and negative,
+without a lower bound, when the model is worse. It is not regression $R^2$ and is not limited to
+$[0,1]$.</p></div>
 
 <p>The function groups the panel by <code>(symbol, horizon, feature_set, model_name)</code> and
 computes each benchmark's mean squared error over the matching
-<code>(symbol, horizon, feature_set)</code> group, so a model is only ever compared with a benchmark
-scored on the same dates. Two benchmarks are reported: <code>atm_iv</code> and
+<code>(symbol, horizon, feature_set)</code> group. A model is therefore compared only with a
+benchmark scored on the same dates. The two benchmarks are <code>atm_iv</code> and
 <code>historical_mean</code>.</p>
 
 <div class="box why"><span class="k">Why two benchmarks and not one</span>
-<p>Scoring only against implied volatility flatters everything. Implied volatility is a biased
-forecast &mdash; it is systematically higher than realized volatility because it carries a risk
-premium &mdash; so almost any unbiased rule beats it. The expanding historical mean has no such bias,
-which makes it the honest hurdle. In the run stored under <code>outputs/</code> every model clears the first hurdle by a wide
-margin and none clears the second.</p></div>
+<p>Scoring only against implied volatility makes every model look good. Implied volatility is usually
+higher than realized volatility because it includes a risk premium, so an unbiased rule can beat it.
+The expanding historical mean has no such bias and is the fairer hurdle. In the run under
+<code>outputs/</code>, every model beats the first hurdle by a wide margin, but none beats the second.</p></div>
 
 <div class="box warn"><span class="k">Trap in the markdown summary</span>
-<p><code>write_research_summary</code> sorts the whole table by root mean squared error and prints the
-top ten. Root mean squared error is in units of the target, so a 5-day horizon and a 60-day horizon
-&mdash; or two different indices &mdash; are not on the same scale. With a single symbol and horizon
-the ranking is fine; add a second horizon and the "best configurations" table starts comparing things
-that cannot be compared.</p></div>
+<p><code>write_research_summary</code> sorts the full table by root mean squared error and prints the
+top ten. Root mean squared error uses the target's units, so a 5-day horizon, a 60-day horizon, and
+different indices are not on the same scale. The ranking is fine for one symbol and horizon; with
+more than one, the "best configurations" table compares incompatible values.</p></div>
 
 
 <h2 id="sec12"><span class="sec-no">12</span>The descriptive layer &mdash; <code>descriptive/analytics.py</code></h2>
 
 <div class="box gist"><span class="k">In plain words</span>
-<p>Fit the regimes once on all fifteen years, then describe them: how many days each holds, how long
-it lasts, how expensive insurance was inside it, and what the index did next.</p></div>
+<p>Fit regimes once on all fifteen years, then describe their duration, insurance cost, and
+subsequent index returns.</p></div>
 
-<p>The pipeline fits a mixture model to choose the regime count, fits a Markov model with that count,
-renames the states by volatility level, recomputes the transition matrix from the renamed path, and
-then hands the labels to six reporting functions.</p>
+<p>The pipeline uses a mixture model to choose the number of regimes, fits a Markov model with that
+count, orders the states by volatility, rebuilds the transition matrix from the renamed path, and
+passes the labels to six reporting functions.</p>
 
 <div class="scroll">
 <table>
@@ -1012,19 +991,17 @@ then hands the labels to six reporting functions.</p>
 <div class="box def"><span class="k">The Sharpe formula used here</span>
 <p>$$\mathrm{Sharpe}=\frac{\bar R_h}{s_h}\sqrt{\frac{A}{h}}$$</p>
 <p class="fnote">$\bar R_h$ and $s_h$ are the mean and standard deviation of the $h$-day forward
-return inside one regime; $A$ is trading days per year; $h$ is the horizon. The square-root factor
-converts a per-window ratio into a per-year one, because there are $A/h$ non-overlapping windows in a
-year. No risk-free rate is subtracted, so this is a raw return-to-risk ratio rather than a true Sharpe
-ratio.</p></div>
+return inside one regime; $A$ is trading days per year; and $h$ is the horizon. The square-root
+factor converts a per-window ratio to an annual value because there are $A/h$ non-overlapping
+windows in a year. The calculation subtracts no risk-free rate, so it is a raw return-to-risk ratio,
+not a true Sharpe ratio.</p></div>
 
 <div class="box warn"><span class="k">Trap in that scaling</span>
-<p>The $\sqrt{A/h}$ factor is the right conversion only if the returns being averaged come from
-windows that do not overlap. They do overlap here: a 20-day forward return is computed on
-<b>every</b> trading day, so two consecutive rows share 19 of their 20 days. The standard deviation
-$s_h$ is therefore measured on strongly dependent observations and is not the standard deviation of
-independent 20-day outcomes. The annual figure the code prints is a reasonable ranking device across
-regimes, because every regime is treated the same way, but it is not a number you could compare with a
-published Sharpe ratio.</p></div>
+<p>The $\sqrt{A/h}$ factor is valid only for non-overlapping windows. Here, a 20-day forward return
+is computed on <b>every</b> trading day, so consecutive rows share 19 of 20 days. The standard
+deviation $s_h$ therefore uses dependent observations and is not the standard deviation of independent
+20-day outcomes. The printed annual value can rank regimes because every regime is treated the same
+way, but it should not be compared with a published Sharpe ratio.</p></div>
 
 <div class="box data"><span class="k">Sample data &mdash; the descriptive run on SPX, all 3,912 days</span>
 <div class="io stack">
@@ -1040,28 +1017,25 @@ regime  atm_iv_near_mean  n_days  pct_days  avg run length  mean VRP   fwd Sharp
 
 GMM vs HMM label agreement: 62.2%
 predictive regression:  R^2 = 0.0107   atm_iv_near coefficient = -0.1966  (p &lt; 0.001)</pre>
-<p class="fnote">Every number in this table comes from the Markov model's labels, not the mixture
-model's, and the two models put the same label on only 62.2% of days &mdash; so which model you report
-changes the story on more than a third of the sample. Regimes 1 and 2 have an average unbroken run of
-about one day. The recomputed
-transition matrix shows why: row 1 is <code>[0, 0, 1, 0, 0]</code> and row 2 sends 96.8% of its mass
-straight back to regime 1. They are not two market states; they are one alternating pair the model
-produced to absorb noise.</p></div>
+<p class="fnote">Every number in this table uses the Markov model's labels, not the mixture model's.
+The two models agree on only 62.2% of days, so the reported model changes more than a third of the
+sample's story. Regimes 1 and 2 last about one day on average. The recomputed transition matrix
+explains why: row 1 is <code>[0, 0, 1, 0, 0]</code>, and row 2 sends 96.8% of its probability back
+to regime 1. They are not two market states; they are an alternating pair that absorbs noise.</p></div>
 </div></div>
 
 <div class="box flag"><span class="k">Stated honestly</span>
-<p>Every number in that table was computed from labels produced by a model that had already seen the
-entire sample, so none of them is a trading result. The average forward Sharpe of $0.33$ in regime 4
-does not mean you could have earned it; you would have needed to know in 2012 how the model would
-label 2023. Section <a href="#sec18">18</a> spells this out.</p></div>
+<p>Every number in that table uses labels from a model that had already seen the full sample, so none
+is a trading result. The average forward Sharpe of $0.33$ in regime 4 is not an achievable return:
+in 2012, you would not have known how the model would label 2023. Section <a href="#sec18">18</a>
+explains this.</p></div>
 
 
 <h2 id="sec13"><span class="sec-no">13</span>What the stored run actually says</h2>
 
-<p>Here is <code>outputs/reports/walkforward/metric_summary.csv</code>, reproduced exactly by
-re-running the code. Note that <code>outputs/</code> is listed in <code>.gitignore</code>, so these
-files are a local result of the last run and are not part of the repository history &mdash; the only
-way to check them is to run the pipeline again, which is what was done here.</p>
+<p>Here is <code>outputs/reports/walkforward/metric_summary.csv</code>, reproduced by running the
+code again. <code>outputs/</code> is listed in <code>.gitignore</code>, so these files are local
+results, not repository history. Re-running the pipeline is the only way to check them.</p>
 
 <div class="scroll">
 <table>
@@ -1082,41 +1056,38 @@ way to check them is to run the pipeline again, which is what was done here.</p>
 </table>
 </div>
 
-<p>Read literally: the flat historical average wins for both symbols, and the regime model, the
-linear model, trailing volatility and implied volatility all lose to it. The project's own research
-question gets a "no".</p>
+<p>Read literally, the flat historical average wins for both symbols. The regime model, linear model,
+trailing volatility, and implied volatility all lose to it. The project's research question gets a
+"no".</p>
 
 <div class="box flag"><span class="k">Why you should not believe that as a market finding</span>
 <p>The tracked files in <code>data/raw/</code> are <b>synthetic demo data</b>, not real market
-history. Running the code prints the evidence:</p>
+history. The code shows why:</p>
 <ul>
-<li>Option deltas take exactly ten values, $\pm0.2,\pm0.3,\pm0.4,\pm0.5,\pm0.6$, on every one of
-3,912 days. Real chains have hundreds of irregular strikes.</li>
-<li>There are exactly two expiries per day, at 30 and 90 days, forever. Real expiry calendars roll.</li>
+<li>Option deltas take exactly ten values, $\pm0.2,\pm0.3,\pm0.4,\pm0.5,\pm0.6$, on all 3,912 days. Real chains have hundreds of irregular strikes.</li>
+<li>There are exactly two expiries per day, at 30 and 90 days, throughout the sample. Real expiry calendars roll.</li>
 <li>Exactly 20 rows per trade date, with volume and open interest running in arithmetic sequences.</li>
 <li>"SPX" ranges from 674.91 to 1617.69 across 2010&ndash;2024 and closes 2024-12-31 at
 <code>1073.08</code>. The real index was near 1,100 in early 2010 and near 5,900 at the end of 2024.
 On 2020-03-23, the deepest day of the COVID sell-off, this series prints <code>1596.51</code> &mdash;
 near its all-time high, with no crash anywhere in it.</li>
-<li>On the aligned panel, the correlation between today's ATM implied volatility and the next
-month's realized volatility is <b>-0.047</b>, and between trailing and forward realized volatility
-<b>-0.065</b>. In real equity index data both are strongly positive; volatility clusters. This series
-has no volatility clustering at all.</li>
+<li>In the aligned panel, the correlation between today's ATM implied volatility and next month's
+realized volatility is <b>-0.047</b>; between trailing and forward realized volatility it is
+<b>-0.065</b>. Both are strongly positive in real equity-index data because volatility clusters.
+This series has no volatility clustering.</li>
 </ul>
-<p>So "the historical mean wins" is a true statement about a series that was constructed with no
-predictable structure. It verifies that the pipeline is not manufacturing skill out of noise &mdash;
-which is a genuinely useful thing to know &mdash; but it is not evidence about implied volatility.
-The <code>README.md</code> is upfront that these are "Portable Demo Data"; the generated
-<code>research_summary.md</code> is not, and reads like a market result.</p></div>
+<p>So "the historical mean wins" is true for a series built with no predictable structure. This shows
+that the pipeline is not creating apparent skill from noise, but it says nothing about implied
+volatility. <code>README.md</code> calls the files "Portable Demo Data"; the generated
+<code>research_summary.md</code> does not and reads like a market result.</p></div>
 
 
 <h2 id="sec14"><span class="sec-no">14</span>Fixes applied</h2>
 
-<p>Three defects were found and fixed in this pass, plus the one test fixture that had to move with
-them. All 43 tests pass on the last commit and pass again with the fixes applied on top of it, checked
-in a clean copy of the repository so that no unrelated working-tree edits could affect the result.
-None of the fixes changes any number on this page, because in each case the hard-coded value happened
-to equal the configured one &mdash; which is exactly why nobody noticed.</p>
+<p>This pass fixed three defects and the test fixture affected by them. All 43 tests pass on the last
+commit and again with these fixes applied in a clean copy of the repository. None of the fixes changes
+a number on this page: each hard-coded value happened to match its configured value, which is why the
+errors went unnoticed.</p>
 
 <div class="scroll">
 <table>
@@ -1125,41 +1096,39 @@ to equal the configured one &mdash; which is exactly why nobody noticed.</p>
 <tr>
 <td><b>A configuration setting did nothing.</b> <code>config.toml</code> defines
 <code>[features] atm_delta = 0.50</code> with the comment "Target ATM absolute delta used for ATM IV
-extraction", but no code ever read it. The at-the-money delta was hard-coded as
-<code>-0.50</code>. Editing the setting had no effect whatsoever.</td>
+extraction", but no code read it. The at-the-money delta was hard-coded as
+<code>-0.50</code>, so editing the setting had no effect.</td>
 <td><code>features/surface.py</code>, <code>pipelines/descriptive_pipeline.py</code>,
 <code>walkforward/engine.py</code></td>
 <td>Added an <code>atm_delta</code> parameter (default <code>0.50</code>) to
-<code>extract_features</code> and the two private helpers below it, used it as
-<code>-abs(atm_delta)</code> on the put side, and passed
+<code>extract_features</code> and its two private helpers. The parameter is used as
+<code>-abs(atm_delta)</code> on the put side and passed as
 <code>feature_config["atm_delta"]</code> from both pipelines.</td>
 </tr>
 <tr>
-<td><b>A silent-wrong-answer trap.</b> <code>descriptive_pipeline</code> called
+<td><b>A silent wrong-answer trap.</b> <code>descriptive_pipeline</code> called
 <code>order_regimes_by_volatility(..., atm_iv_col_idx=0)</code>, trusting that
-<code>atm_iv_near</code> is the first feature column. It is, today. If the feature order ever
-changed, regimes would be ranked by whatever landed in column 0 &mdash; skew, say &mdash; with no
-error raised. The walk-forward path already avoids this by looking the column up by name, and a unit
-test exists specifically to protect that behaviour there.</td>
+<code>atm_iv_near</code> is the first feature column. It is first today. If the feature order changed,
+regimes would be ranked by whatever moved into column 0, such as skew, with no error. The walk-forward
+path already looks up the column by name, and a unit test protects that behaviour.</td>
 <td><code>pipelines/descriptive_pipeline.py</code></td>
 <td>Replaced the literal <code>0</code> with
-<code>int(features_clean.columns.get_loc("atm_iv_near"))</code>. Same value today, no longer
-fragile.</td>
+<code>int(features_clean.columns.get_loc("atm_iv_near"))</code>. The value is unchanged today, but
+the lookup is no longer fragile.</td>
 </tr>
 <tr>
-<td><b>An annualization factor hard-coded past its setting.</b>
+<td><b>An annualization factor ignored its setting.</b>
 <code>forward_returns_by_regime</code> computed its Sharpe scaling as
 <code>np.sqrt(252 / horizon)</code> while the same pipeline read
 <code>[analysis] annualization_factor</code> from <code>config.toml</code> for every other volatility
-calculation. Changing the setting would have rescaled the volatilities and left the Sharpe ratios
-alone.</td>
+calculation. Changing the setting would have rescaled volatility but left the Sharpe ratios unchanged.</td>
 <td><code>descriptive/analytics.py</code>, <code>pipelines/descriptive_pipeline.py</code></td>
 <td>Added an <code>annualization</code> parameter (default <code>252</code>) and passed the
 configured value.</td>
 </tr>
 <tr>
-<td><b>Test fixture out of step.</b> The integration test's stub configuration mirrors
-<code>config.toml</code> but had no <code>atm_delta</code> key, so it failed once the pipeline started
+<td><b>Test fixture was out of step.</b> The integration test's stub configuration mirrors
+<code>config.toml</code> but had no <code>atm_delta</code> key, so it failed when the pipeline began
 reading it.</td>
 <td><code>tests/integration/test_pipeline_cache_integration.py</code></td>
 <td>Added <code>"atm_delta": 0.50</code> to <code>_pipeline_config()</code>.</td>
@@ -1173,43 +1142,43 @@ reading it.</td>
 <code>atm_iv_near, atm_iv_mid, skew_near, skew_mid, butterfly_near, butterfly_mid, term_slope</code>.
 The actual DataFrame order, confirmed by running the code, is
 <code>atm_iv_near, skew_near, butterfly_near, atm_iv_mid, skew_mid, butterfly_mid, term_slope</code>
-&mdash; near-term block first, then mid-term. The docstring now matches. This matters because the
-list looked like an authority on column positions and was wrong about them.</p></div>
+&mdash; near-term block first, then mid-term. The docstring now matches. This matters because later
+code uses these positions.</p></div>
 
 <div class="box def"><span class="k">Not a code bug: a broken environment</span>
-<p>The test suite initially failed to even import <code>numpy</code>. This was a corrupted
-<code>.venv</code>, not a defect in the repository. Deleting <code>.venv</code> and re-running
+<p>The test suite initially could not import <code>numpy</code> because <code>.venv</code> was
+corrupted. Deleting <code>.venv</code> and re-running
 <code>uv sync --group dev</code> restored a clean environment and all 43 tests pass. Nothing in the
 repository was changed for this.</p></div>
 
 <div class="box why"><span class="k">What is not in the commit, and why</span>
-<p>The working tree also carried an automated formatting pass that nobody in this session asked for:
-import reordering, quote and line-wrap changes, blank lines removed, a few redundant
+<p>The working tree also carried an automated formatting pass that was outside this task:
+import reordering, quote and line-wrap changes, removed blank lines, a few redundant
 <code>int(len(...))</code> calls simplified, one <code># noqa</code> comment dropped. Those hunks change
-no behaviour, so they were left uncommitted rather than mixed into a fix commit. They were checked one
-by one for the failure mode that matters &mdash; an import silently deleted while still in use &mdash;
-and none was found here; every module still imports and all 43 tests pass.</p>
-<p>Five files carry a real fix and a formatting change in the same diff, and git cannot stage half a
-hunk cleanly, so those five were committed whole:
+no behaviour, so they were left uncommitted rather than mixed into the fix commit. They were checked
+for the important failure mode&mdash;an import deleted while still in use&mdash;and none was found.
+Every module still imports and all 43 tests pass.</p>
+<p>Five files contain both a real fix and a formatting change in the same diff. Git cannot stage half
+a hunk cleanly, so those five were committed whole:
 <code>features/surface.py</code>, <code>descriptive/analytics.py</code>,
 <code>pipelines/descriptive_pipeline.py</code>, <code>walkforward/engine.py</code> and
 <code>tests/integration/test_pipeline_cache_integration.py</code>. Everything else was left alone.</p></div>
 
 <h4>Things deliberately left alone</h4>
 <ul>
-<li>The <code>OUTPUT_DIR</code> global in the engine. Fixing it properly means changing the
-<code>run_research</code> signature, which the tests and notebook call. Documented as a trap instead.</li>
-<li>The global root-mean-squared-error sort in <code>write_research_summary</code>. Changing it changes
-published output.</li>
-<li>The full-sample regime labels in the descriptive layer. That is the research design, not a slip;
-rewriting it would be a different project. See <a href="#sec18">limitations</a>.</li>
+<li>The <code>OUTPUT_DIR</code> global in the engine. Fixing it properly would change the
+<code>run_research</code> signature used by the tests and notebook, so it is documented as a trap.</li>
+<li>The global root-mean-squared-error sort in <code>write_research_summary</code>. Changing it would
+change published output.</li>
+<li>The full-sample regime labels in the descriptive layer. That is the research design, not an
+accident; changing it would be a different project. See <a href="#sec18">limitations</a>.</li>
 <li>The fragile Markov-model fit, where six of ten restarts collapse. Raising the restart count or
 adding a covariance floor would change every published regime label, so it is
-<a href="#sec8">documented</a> rather than altered.</li>
+<a href="#sec8">documented</a> rather than changed.</li>
 <li>The dropped Markov-model blocks in <code>_forecast_hmm_batch_safely</code>. With the shipped
-settings no Hidden Markov Model rows are produced at all, so nothing is currently affected; it is
-listed as a trap for anyone who switches them on.</li>
-<li>Everything cosmetic. Nothing was renamed or restructured for style.</li>
+settings no Hidden Markov Model rows are produced, so nothing is currently affected; it is listed
+as a trap for anyone who enables them.</li>
+<li>Cosmetic changes. Nothing was renamed or restructured for style.</li>
 </ul>
 
 
@@ -1272,7 +1241,7 @@ cli.descriptive.main
         └── plotting.plot_*  (seven PNG writers)</pre>
 
 
-<h2 id="sec16"><span class="sec-no">16</span>Edge cases</h2>
+<h2 id="sec16"><span class="sec-no">16</span>Edge cases and their handling</h2>
 
 <div class="scroll">
 <table>
@@ -1298,93 +1267,88 @@ cli.descriptive.main
 </div>
 
 
-<h2 id="sec17"><span class="sec-no">17</span>Traps a reader should know about</h2>
+<h2 id="sec17"><span class="sec-no">17</span>Traps to watch for</h2>
 
 <div class="scroll">
 <table>
 <thead><tr><th>Thing</th><th>What it does</th><th>The trap</th></tr></thead>
 <tbody>
-<tr><td><code>.shift(-horizon)</code></td><td>Moves a backward-looking rolling statistic onto the day it forecasts from</td><td>Off by one in either direction and you have either leaked the future or thrown away a day. The sign is negative and the size is exactly the horizon.</td></tr>
-<tr><td><code>i(t) + h &lt; i(s)</code></td><td>The embargo test</td><td>Strict, not <code>&lt;=</code>. With <code>&lt;=</code> the last training label would end exactly on the first test day and would leak one return.</td></tr>
-<tr><td>Position lookups from <code>_build_price_date_positions</code></td><td>Maps dates to price-calendar positions</td><td>Positions come from the <b>price</b> calendar. Using feature-frame positions would make the embargo narrower wherever option data is missing.</td></tr>
-<tr><td><code>scaler.transform(...)</code> on test rows</td><td>Applies the training mean and scale</td><td>Calling <code>fit_transform</code> here instead would leak the test distribution into the scaling. The difference is one method name.</td></tr>
-<tr><td><code>fitted_model.predict(...)[-1]</code></td><td>Takes the last state of a Viterbi path</td><td>Any other index would be a smoothed label that saw the future. The <code>[-1]</code> is load-bearing.</td></tr>
-<tr><td><code>order_regimes_by_volatility</code></td><td>Renames labels so 0 is calmest</td><td>Skipping it makes regime numbers meaningless across fits. Two refits with different seeds can swap labels 0 and 1 for free.</td></tr>
+<tr><td><code>.shift(-horizon)</code></td><td>Moves a backward-looking rolling statistic to the day it forecasts from</td><td>An off-by-one error either leaks the future or drops a day. The sign is negative and the size is exactly the horizon.</td></tr>
+<tr><td><code>i(t) + h &lt; i(s)</code></td><td>The embargo test</td><td>It must be strict, not <code>&lt;=</code>. With <code>&lt;=</code>, the last training label ends on the first test day and leaks one return.</td></tr>
+<tr><td>Position lookups from <code>_build_price_date_positions</code></td><td>Maps dates to price-calendar positions</td><td>Use the <b>price</b> calendar. Feature-frame positions would narrow the embargo where option data is missing.</td></tr>
+<tr><td><code>scaler.transform(...)</code> on test rows</td><td>Applies the training mean and scale</td><td>Calling <code>fit_transform</code> here would leak the test distribution into the scaling. The difference is one method name.</td></tr>
+<tr><td><code>fitted_model.predict(...)[-1]</code></td><td>Takes the last state of a Viterbi path</td><td>Another index would be a smoothed label that saw the future. The <code>[-1]</code> is essential.</td></tr>
+<tr><td><code>order_regimes_by_volatility</code></td><td>Renames labels so 0 is calmest</td><td>Skipping it makes regime numbers incomparable across fits. Different seeds can swap labels 0 and 1.</td></tr>
 <tr><td><code>fixed_k_values = []</code></td><td>Empty list becomes <code>None</code> in <code>main()</code></td><td>Switches off <b>all</b> Hidden Markov Model rows, not just the fixed-count sweep.</td></tr>
-<tr><td><code>except RuntimeError: return None</code> in <code>_forecast_hmm_batch_safely</code></td><td>Skips a Markov-model block that would not fit</td><td>Those forecast dates vanish from the panel for that model only, while the benchmarks keep all of theirs. The relative score then compares two different date sets, quietly breaking the "identical dates" guarantee the documentation makes.</td></tr>
+<tr><td><code>except RuntimeError: return None</code> in <code>_forecast_hmm_batch_safely</code></td><td>Skips a Markov-model block that would not fit</td><td>Those dates disappear for that model while the benchmarks keep them. The relative score then compares different date sets, breaking the "identical dates" guarantee.</td></tr>
 <tr><td><code>OUTPUT_DIR</code> module global</td><td>Where results are written</td><td>Only <code>main()</code> sets it from configuration. Calling <code>run_research</code> directly ignores <code>output_dir</code>.</td></tr>
 <tr><td><code>rolling(h).std()</code></td><td>Sample standard deviation, denominator $h-1$</td><td>Not the population version. At $h=20$ the difference is about 2.6%, which is small but not nothing if you compare against a source that uses $h$.</td></tr>
-<tr><td>Overlapping 20-day targets</td><td>Consecutive labels share 19 of their 20 returns</td><td>Errors are heavily autocorrelated, so the 1,332 forecasts are worth far fewer independent observations. The report gives point estimates with no significance test, which is the honest choice given this.</td></tr>
+<tr><td>Overlapping 20-day targets</td><td>Consecutive labels share 19 of 20 returns</td><td>Errors are strongly dependent, so 1,332 forecasts represent far fewer independent observations. The report gives point estimates without a significance test, which is appropriate here.</td></tr>
 </tbody>
 </table>
 </div>
 
 
-<h2 id="sec18"><span class="sec-no">18</span>Honest limitations</h2>
+<h2 id="sec18"><span class="sec-no">18</span>Limitations</h2>
 
-<div class="box flag"><span class="k">The descriptive layer uses smoothed labels, and smoothed labels see the future</span>
-<p>This is the most important caveat in the repository, and it is structural rather than a bug.</p>
-<p>In <code>descriptive_pipeline.run_pipeline_for_symbol</code>, both models are fitted on the entire
-sample, and the Markov model's labels come from Viterbi decoding the entire sequence at once. A
-<b>filtered</b> label for day $t$ would use only $x_1,\ldots,x_t$. A <b>smoothed</b> label uses
-$x_1,\ldots,x_T$ &mdash; the whole history, including everything after $t$. Formally the
-forward-backward quantities that drive the fit are
-$\gamma_t(k)=\Pr(z_t=k\mid x_{1:T})$, and $T$ is the last day of the sample, not day $t$. On top of
-that, the parameters $\mu_k$, $\Sigma_k$ and $A$ were themselves estimated from all $T$ days.</p>
-<p>The practical consequence: <code>forward_returns_by_regime</code> reports a Sharpe ratio of $0.33$
-in regime 4 and $-0.55$ in regime 3, and <code>predictive_regression</code> reports regime dummy
-coefficients with p-values below 0.01. None of these is achievable. To act on a regime-4 label in
-2013 you would have needed the 2024 data that helped produce it. The correct reading is
-"days the model retrospectively grouped together also had these outcomes", which is a description,
-not a forecast.</p>
-<p><b>Why it was not fixed here.</b> Converting the descriptive layer to filtered labels means
-refitting at every date and rewriting every downstream statistic &mdash; that is a research redesign,
-not a defect repair, and the repository already contains the leakage-safe version of the same
-question in the walk-forward layer. The walk-forward layer is clean: models are fitted on embargoed
-past data only, the scaler is fitted on training rows only, and the Markov path takes only the last
-Viterbi state so no future observation exists to condition on.</p></div>
+<div class="box flag"><span class="k">The descriptive layer uses smoothed labels, which see the future</span>
+<p>This is a structural limitation, not a bug.</p>
+<p>In <code>descriptive_pipeline.run_pipeline_for_symbol</code>, both models are fitted on the full
+sample, and the Markov model labels the full sequence with Viterbi decoding. A <b>filtered</b> label
+for day $t$ uses only $x_1,\ldots,x_t$. A <b>smoothed</b> label uses $x_1,\ldots,x_T$, including
+days after $t$. The forward-backward quantities that drive the fit are
+$\gamma_t(k)=\Pr(z_t=k\mid x_{1:T})$, where $T$ is the sample's last day, not day $t$. The parameters
+$\mu_k$, $\Sigma_k$, and $A$ are also estimated from all $T$ days.</p>
+<p>As a result, <code>forward_returns_by_regime</code> reports a Sharpe ratio of $0.33$ in regime 4
+and $-0.55$ in regime 3, while <code>predictive_regression</code> reports coefficients for regime
+indicator variables with p-values below 0.01. These are not achievable results. Acting on a regime-4 label in 2013 would
+require the 2024 data that helped create it. Read them as outcomes for days grouped together after
+the fact, not as forecasts.</p>
+<p><b>Why it was not fixed here.</b> Filtered labels would require refitting at every date and
+rewriting every downstream statistic. That is a research redesign, not a defect repair. The
+walk-forward layer already asks the same question without this leakage: models use embargoed past
+data, the scaler uses training rows only, and the Markov path keeps only the last Viterbi state.</p></div>
 
-<div class="box flag"><span class="k">The demo data is synthetic, and the generated summary does not say so</span>
-<p>Detailed in <a href="#sec13">section 13</a>. The short version: the tracked
+<div class="box flag"><span class="k">The demo data is synthetic, but the generated summary does not say so</span>
+<p>See <a href="#sec13">section 13</a>. In short, the tracked
 <code>data/raw/</code> files have a fixed ten-point delta grid, two permanent expiries, no COVID
 crash, and a correlation of $-0.047$ between implied and subsequent realized volatility. Every
 number in <code>outputs/reports/walkforward/</code> and in the <code>blog/</code> folder is a correct
 computation on a series with no predictable structure. <code>README.md</code> calls them "Portable
 Demo Data"; the auto-generated <code>research_summary.md</code> presents the same numbers as
-research findings with no such caveat, and that file is what a casual reader opens.</p></div>
+research findings without the caveat, and that is the file a casual reader opens.</p></div>
 
-<div class="box flag"><span class="k">The statistical tests that are not there</span>
+<div class="box flag"><span class="k">The report has no statistical significance tests</span>
 <p>The report gives point estimates only. With 20-day overlapping targets, consecutive errors share
-19 of 20 returns, so 1,332 forecasts carry roughly 66 independent observations. A difference in root
-mean squared error of 0.00001 &mdash; which is the gap between the regime model and the historical
-mean for SPX &mdash; is far inside the noise. The absence of a Diebold-Mariano style test with an
-overlap-robust standard error means the ranking in <code>research_summary.md</code> should be read as
-"indistinguishable" rather than "in this order". The methodology document does state this;
-the summary file does not.</p></div>
+19 of 20 returns, so 1,332 forecasts provide roughly 66 independent observations. A root mean
+squared error difference of 0.00001&mdash;the gap between the regime model and historical mean for
+SPX&mdash;is well within the noise. Without a Diebold-Mariano style test (a forecast-error comparison)
+and an overlap-robust
+standard error, read the ranking in <code>research_summary.md</code> as "indistinguishable", not as
+a reliable order. The methodology document says this; the summary file does not.</p></div>
 
 <div class="box flag"><span class="k">The Markov model finds states that are not market states</span>
-<p>On the descriptive SPX run the selected five states include two whose average unbroken run length
-is <b>about one day</b> (1.00 and 1.02), holding 398 and 407 days between them, with a transition matrix that sends state 1
-to state 2 with probability 1.0 and state 2 back to state 1 with probability 0.968. That is a
-two-cycle absorbing noise, not a regime. The code reports it in the same table and with the same
-human-readable names ("Normal", "High-Skew Crash Fear") as the genuinely persistent states, which
-makes it easy to over-read. Those names in <code>REGIME_NAMES</code> are assigned purely by
-volatility rank &mdash; nothing verifies that state 2 has anything to do with crash fear.</p></div>
+<p>In the descriptive SPX run, two of the five selected states last <b>about one day</b> on average
+(1.00 and 1.02), covering 398 and 407 days. The transition matrix sends state 1 to state 2 with
+probability 1.0 and state 2 back to state 1 with probability 0.968. This is a two-cycle noise
+pattern: the model alternates between the two states. It is not a regime. The code reports it with the same human-readable names ("Normal",
+"High-Skew Crash Fear") used for persistent states, which invites over-interpretation. Names in
+<code>REGIME_NAMES</code> use volatility rank only; nothing shows that state 2 represents crash fear.</p></div>
 
 <div class="box flag"><span class="k">What the walk-forward layer still does not cover</span>
 <ul>
-<li><b>No transaction costs, no capacity, no execution.</b> This forecasts a number; it does not
+<li><b>No transaction costs, capacity, or execution.</b> This forecasts a number; it does not
 simulate a trade.</li>
-<li><b>Hard regime assignment.</b> The forecast uses the single most likely regime, discarding the
-probability that today is a borderline case. A probability-weighted average of regime means would use
-strictly more information.</li>
-<li><b>One horizon, one feature set by default.</b> The shipped configuration runs $h=20$ and
-<code>atm_term</code> only. Conclusions about other horizons are untested.</li>
+<li><b>Hard regime assignment.</b> The forecast uses only the most likely regime and discards the
+probability that today is borderline. A probability-weighted average of regime means would use more
+information.</li>
+<li><b>One horizon and feature set by default.</b> The shipped configuration runs $h=20$ and
+<code>atm_term</code> only. Other horizons are untested.</li>
 <li><b>Expanding window only.</b> The rolling-window split builder exists and is tested but is never
-called, so there is no evidence on whether a fixed-length memory would do better.</li>
+called, so the project does not show whether a fixed-length history would do better.</li>
 <li><b>Regime count re-selected at every step.</b> The number of regimes can change between
-consecutive splits, so a "regime 1" in 2020 and a "regime 1" in 2023 need not describe the same
-thing even after volatility ordering.</li>
+consecutive splits, so "regime 1" in 2020 and "regime 1" in 2023 may describe different groups even
+after volatility ordering.</li>
 </ul></div>
 
 
@@ -1394,23 +1358,22 @@ thing even after volatility ordering.</li>
 <table>
 <thead><tr><th>Check</th><th>How it works</th><th>What it catches</th></tr></thead>
 <tbody>
-<tr><td>43 automated tests</td><td><code>uv run python -m pytest</code></td><td>Ran green on the last commit, and green again with only the fixed files layered on top of it in a clean copy. Covers interpolation arithmetic, feature-set stability, target alignment, split boundaries, embargo behaviour, the equality of block and single-row forecasts, metric aggregation, and both offline cache paths.</td></tr>
-<tr><td>Target arithmetic checked by hand</td><td>Standard deviation of the twenty log returns after 2010-01-04 is 0.011450; times $\sqrt{252}$ is 0.18176</td><td>Confirms the shift direction and size. A sign error would show up immediately.</td></tr>
-<tr><td>Stored outputs reproduced, byte for byte</td><td>The full walk-forward command was re-run end to end with the fixes in place. All three files it writes &mdash; <code>forecast_panel.csv</code> (1.1 MB, 13,320 rows), <code>metric_summary.csv</code> and <code>research_summary.md</code> &mdash; came back <b>identical</b> to the versions already sitting in <code>outputs/</code>. Individual values were re-derived too: <code>historical_mean = 0.15062463240462223</code> and <code>atm_iv = 0.13969191635162806</code> for 2019-10-28, 1,332 forecast dates per model.</td><td>Confirms the CSV files under <code>outputs/</code> came from this code, that the run is fully deterministic, and that none of the fixes moved a published number.</td></tr>
+<tr><td>43 automated tests</td><td><code>uv run python -m pytest</code></td><td>Passed on the last commit and again with only the fixed files applied in a clean copy. They cover interpolation, feature-set stability, target alignment, split boundaries, embargo behaviour, block and single-row forecast equality, metric aggregation, and both offline cache paths.</td></tr>
+<tr><td>Target arithmetic checked by hand</td><td>Standard deviation of the twenty log returns after 2010-01-04 is 0.011450; times $\sqrt{252}$ is 0.18176</td><td>Confirms the shift direction and size. A sign error would appear immediately.</td></tr>
+<tr><td>Stored outputs reproduced, byte for byte</td><td>The full walk-forward command was rerun with the fixes. All three files it writes &mdash; <code>forecast_panel.csv</code> (1.1 MB, 13,320 rows), <code>metric_summary.csv</code> and <code>research_summary.md</code> &mdash; were <b>identical</b> to the files in <code>outputs/</code>. Individual values also matched: <code>historical_mean = 0.15062463240462223</code> and <code>atm_iv = 0.13969191635162806</code> for 2019-10-28, with 1,332 forecast dates per model.</td><td>Confirms the CSV files under <code>outputs/</code> came from this code, the run is deterministic, and the fixes did not change a published number.</td></tr>
 <tr><td>Model-selection arithmetic checked</td><td>$19\log(2520)=148.81$ and $148.81+14444.49=14593.30$, half of which is the implied log-likelihood 7296.65</td><td>Confirms the criterion's sign convention and the free-parameter count for full covariance matrices.</td></tr>
-<tr><td>Embargo width measured</td><td>The first split drops exactly 20 of 2,520 training rows at $h=20$; the last safe date sits at price position 2519 against a test start at 2540</td><td>Confirms the gap is measured in price-calendar days and is exactly one horizon wide.</td></tr>
-<tr><td>A capacity check before any fitting</td><td><code>_maximum_safe_train_size</code></td><td>An impossible configuration fails loudly rather than writing empty result files.</td></tr>
-<tr><td>Cache integrity, four gates</td><td>Version, schema, row count, date coverage</td><td>A truncated or stale Parquet file is refused rather than silently used.</td></tr>
+<tr><td>Embargo width measured</td><td>The first split drops exactly 20 of 2,520 training rows at $h=20$; the last safe date sits at price position 2519 against a test start at 2540</td><td>Confirms that the gap uses price-calendar days and is exactly one horizon wide.</td></tr>
+<tr><td>A capacity check before any fitting</td><td><code>_maximum_safe_train_size</code></td><td>An impossible configuration fails instead of writing empty result files.</td></tr>
+<tr><td>Cache integrity, four checks</td><td>Version, schema, row count, date coverage</td><td>A truncated or stale Parquet file is refused instead of used silently.</td></tr>
 </tbody>
 </table>
 </div>
 
 <div class="box why"><span class="k">Where the numbers on this page came from</span>
-<p>Every figure in every <b>Sample data</b> box was printed by running this repository's own functions
-against <code>data/raw/</code> in the project environment on 2026-08-10, using
-<code>uv run python</code>. Nothing was estimated, rounded from memory, or carried over from the CSV
-files under <code>outputs/</code> except where the page explicitly says it is quoting them &mdash; and
-in those cases the values were re-derived and matched.</p></div>
+<p>Every figure in every <b>Sample data</b> box came from this repository's functions running against
+<code>data/raw/</code> in the project environment on 2026-08-10 with <code>uv run python</code>.
+Nothing was estimated, recalled, or copied from the CSV files under <code>outputs/</code>, except
+where the page says it is quoting them; those values were re-derived and matched.</p></div>
 
 <p class="foot">Companion reading: <code>README.md</code> for the research framing,
 <code>docs/reference/walkforward_methodology.md</code> for the alignment contract,
