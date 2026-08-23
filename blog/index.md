@@ -8,17 +8,17 @@ categories: ["Quantitative Research", "Risk Management"]
 
 # Volatility regimes are easy to find. Forecast value is harder.
 
-An option surface rarely moves as one number. At-the-money implied volatility can rise while the skew steepens, the wings change shape, and short maturities reprice faster than longer ones. Calling the whole episode “high volatility” throws away most of that structure.
+An option surface rarely moves as one number. At-the-money implied volatility can rise while the skew steepens, the wings change shape, and short maturities reprice faster than longer ones. Calling the whole episode "high volatility" discards most of that information.
 
-This project asks a narrower question: if I compress the daily SPX and NDX option surfaces into a small feature vector, can latent states improve forecasts of the next 20 trading days of realized volatility?
+I wanted to answer a narrower question. If I compress the daily SPX and NDX option surfaces into a small feature vector, can latent states improve forecasts of realized volatility over the next 20 trading days?
 
-The code has two parts. A descriptive pipeline finds states in the complete sample. A walk-forward pipeline refits on past data, predicts one block at a time, and compares a regime forecast with current at-the-money implied volatility, the expanding historical mean, trailing realized volatility, and linear regression. Keeping those parts separate matters. A clean cluster plot is evidence that the surface has structure. It is not evidence that the structure forecasts anything.
+The code has two parts. A descriptive pipeline finds states in the complete sample. A walk-forward pipeline refits on past data, predicts one block at a time, and compares a regime forecast with current at-the-money implied volatility, the expanding historical mean, trailing realized volatility, and linear regression. I keep those jobs separate for a reason. A clean cluster plot shows structure in the surface. It says nothing yet about forecast value.
 
 The repository ships portable demo data for 3,912 trading days from 2010-01-04 through 2024-12-31. The results below describe that tracked sample. They should not be read as a production study based on independently sourced vendor history.
 
 ## A daily surface in seven numbers
 
-Let $\sigma_t(\Delta,\tau)$ denote annualized implied volatility on trade date $t$, at signed option delta $\Delta$ and maturity $\tau$. Delta is a scale-free coordinate: a 25-delta option occupies a comparable part of the surface even when the index level changes.
+Let $\sigma_t(\Delta,\tau)$ denote annualized implied volatility on trade date $t$, at signed option delta $\Delta$ and maturity $\tau$. Delta is a scale-free coordinate. A 25-delta option occupies a comparable part of the surface even when the index level changes.
 
 For each date, the feature builder chooses the expiry nearest 30 days inside a 15-to-45-day bucket and the expiry nearest 90 days inside a 45-to-120-day bucket. It linearly interpolates along delta, then records seven values:
 
@@ -133,7 +133,7 @@ for train_date in train_index:
         safe_train_dates.append(train_date)
 ```
 
-This detail does more for credibility than another state model. Without it, an expanding window looks causal while its labels quietly cross the boundary.
+This detail matters more than adding another state model. Without it, an expanding window looks causal while its labels cross the test boundary.
 
 ## Fixing an experiment that could not start
 
@@ -196,7 +196,7 @@ The cumulative loss difference uses squared errors in percentage-point units. A 
 
 The central hypothesis fails on the portable demo sample under this configuration. GMM regimes describe the option surface cleanly, yet their conditional target means do not beat the expanding historical mean from 2019-10-28 through 2024-12-03.
 
-The conclusion is narrow for four reasons. First, the tracked Parquet files are teaching data, not independently verified vendor history. Second, the run tests one 20-day horizon and the three-column `atm_term` feature set. Third, adjacent targets share 19 of 20 returns, so 1,332 daily errors are not 1,332 independent observations. The report gives point estimates and no overlap-adjusted inference. Fourth, BIC state selection and model parameters are re-estimated every five dates. This is computationally costly, and the result may depend on the refit schedule.
+The conclusion is narrow. The tracked Parquet files are teaching data, not independently verified vendor history. The run tests one 20-day horizon and the three-column `atm_term` feature set. Adjacent targets share 19 of 20 returns, so 1,332 daily errors are not 1,332 independent observations. The report gives point estimates and no overlap-adjusted inference. BIC state selection and model parameters are re-estimated every five dates, so the result may depend on the refit schedule and takes substantial computation.
 
 A production study should freeze the design before inspecting losses, test the registered feature sets and several horizons, and report non-overlapping block results or heteroskedasticity-and-autocorrelation-consistent uncertainty. It should also check calibration on real option quotes, including quote quality, delta conventions, expiry interpolation, and the distinction between implied and physical volatility.
 
@@ -207,4 +207,4 @@ A production study should freeze the design before inspecting losses, test the r
 - Andersen, Bollerslev, Diebold, and Labys (2003), [“Modeling and Forecasting Realized Volatility”](https://doi.org/10.1111/1468-0262.00418), for realized-volatility measurement and forecasting.
 - Campbell and Thompson (2008), [“Predicting Excess Stock Returns Out of Sample: Can Anything Beat the Historical Average?”](https://doi.org/10.1093/rfs/hhm055), for the historical-average benchmark and relative out-of-sample $R^2$ framing.
 
-The useful finding is the failed comparison. Once the unconditional mean enters the panel, the apparent regime advantage disappears.
+The failed comparison is the finding. Once the unconditional mean enters the panel, the apparent regime advantage disappears.

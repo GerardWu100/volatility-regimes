@@ -8,17 +8,17 @@ categories: ["Quantitative Research", "Risk Management"]
 
 # Les régimes de volatilité sont faciles à trouver. Leur valeur prédictive l'est moins.
 
-Une surface d'options évolue rarement comme un seul chiffre. La volatilité implicite at-the-money peut monter pendant que le skew se creuse, que les ailes changent de forme et que les échéances courtes se repricent plus vite que les longues. Résumer tout l'épisode par « volatilité élevée » fait disparaître une bonne partie de l'information.
+Une surface d'options évolue rarement comme un seul chiffre. La volatilité implicite at-the-money peut monter pendant que le skew se creuse, que les ailes changent de forme et que les échéances courtes se repricent plus vite que les longues. Résumer tout l'épisode par "volatilité élevée" fait disparaître une bonne partie de l'information.
 
-Ce projet pose une question plus précise : si je ramène chaque surface quotidienne du SPX et du NDX à un petit vecteur de caractéristiques, les états latents améliorent-ils la prévision de la volatilité réalisée sur les 20 prochaines séances ?
+Je voulais répondre à une question plus précise. Si je ramène chaque surface quotidienne du SPX et du NDX à un petit vecteur de caractéristiques, les états latents améliorent-ils la prévision de la volatilité réalisée sur les 20 prochaines séances ?
 
-Le code comporte deux volets. Le pipeline descriptif repère des états sur l'échantillon complet. Le pipeline walk-forward réestime les modèles sur le passé, prédit un bloc à la fois et compare la prévision par régime à la volatilité implicite at-the-money courante, à la moyenne historique croissante, à la volatilité réalisée historique et à une régression linéaire. La distinction entre les deux volets est décisive. Un graphique de clusters bien net montre que la surface possède une structure. Il ne prouve pas que cette structure permet de prévoir la suite.
+Le code comporte deux volets. Le pipeline descriptif repère des états sur l'échantillon complet. Le pipeline walk-forward réestime les modèles sur le passé, prédit un bloc à la fois et compare la prévision par régime à la volatilité implicite at-the-money courante, à la moyenne historique croissante, à la volatilité réalisée historique et à une régression linéaire. Je sépare ces tâches pour une raison précise. Un graphique de clusters net montre une structure dans la surface. Il ne dit encore rien de sa valeur prédictive.
 
 Le dépôt fournit des données de démonstration portables pour 3,912 séances, du 2010-01-04 au 2024-12-31. Les résultats ci-dessous décrivent cet échantillon suivi par Git. Ils ne remplacent pas une étude de production fondée sur un historique fournisseur vérifié séparément.
 
 ## Une surface quotidienne résumée en sept chiffres
 
-Soit $\sigma_t(\Delta,\tau)$ la volatilité implicite annualisée à la date $t$, pour un delta signé $\Delta$ et une échéance $\tau$. Le delta fournit une coordonnée indépendante de l'échelle : une option 25-delta occupe une zone comparable de la surface même lorsque le niveau de l'indice change.
+Soit $\sigma_t(\Delta,\tau)$ la volatilité implicite annualisée à la date $t$, pour un delta signé $\Delta$ et une échéance $\tau$. Le delta fournit une coordonnée indépendante de l'échelle. Une option 25-delta occupe une zone comparable de la surface même lorsque le niveau de l'indice change.
 
 Pour chaque date, le constructeur choisit l'échéance la plus proche de 30 jours dans une plage de 15 à 45 jours, puis celle la plus proche de 90 jours dans une plage de 45 à 120 jours. Il interpole linéairement en delta et conserve sept valeurs :
 
@@ -133,7 +133,7 @@ for train_date in train_index:
         safe_train_dates.append(train_date)
 ```
 
-Ce détail apporte davantage de crédibilité qu'un modèle d'états supplémentaire. Sans cet embargo, la fenêtre croissante paraît causale alors que ses étiquettes franchissent discrètement la frontière du test.
+Ce détail compte davantage que l'ajout d'un modèle d'états. Sans cet embargo, la fenêtre croissante paraît causale alors que ses étiquettes franchissent la frontière du test.
 
 ## Réparer une expérience qui ne pouvait pas démarrer
 
@@ -196,7 +196,7 @@ La différence de perte cumulée utilise les erreurs quadratiques en points de p
 
 L'hypothèse centrale échoue sur les données de démonstration avec cette configuration. Les régimes GMM décrivent nettement la surface d'options, mais leurs moyennes conditionnelles ne battent pas la moyenne historique croissante entre le 2019-10-28 et le 2024-12-03.
 
-Cette conclusion reste étroite pour quatre raisons. Les fichiers Parquet suivis par Git sont des données pédagogiques, pas un historique fournisseur vérifié indépendamment. Le run ne teste qu'un horizon de 20 jours et l'ensemble de trois colonnes `atm_term`. Les cibles adjacentes partagent 19 rendements sur 20. Les 1,332 erreurs quotidiennes ne constituent donc pas 1,332 observations indépendantes. Le rapport fournit des estimations ponctuelles sans inférence corrigée du chevauchement. Enfin, la sélection du nombre d'états par BIC et les paramètres sont réestimés toutes les cinq dates. Ce choix coûte du temps de calcul, et le résultat peut dépendre du calendrier de réestimation.
+Cette conclusion reste étroite. Les fichiers Parquet suivis par Git sont des données pédagogiques, pas un historique fournisseur vérifié indépendamment. Le run ne teste qu'un horizon de 20 jours et l'ensemble de trois colonnes `atm_term`. Les cibles adjacentes partagent 19 rendements sur 20. Les 1,332 erreurs quotidiennes ne constituent donc pas 1,332 observations indépendantes. Le rapport fournit des estimations ponctuelles sans inférence corrigée du chevauchement. La sélection du nombre d'états par BIC et les paramètres sont réestimés toutes les cinq dates. Le résultat peut donc dépendre du calendrier de réestimation, et le calcul reste coûteux.
 
 Une étude de production devrait figer son protocole avant d'observer les pertes, tester les ensembles de caractéristiques déclarés et plusieurs horizons, puis publier des résultats sur blocs non chevauchants ou une incertitude corrigée de l'hétéroscédasticité et de l'autocorrélation. Elle devrait aussi vérifier le calibrage sur de vraies cotations d'options : qualité des cotations, conventions de delta, interpolation des échéances et distinction entre volatilité implicite et physique.
 
@@ -207,4 +207,4 @@ Une étude de production devrait figer son protocole avant d'observer les pertes
 - Andersen, Bollerslev, Diebold, and Labys (2003), [“Modeling and Forecasting Realized Volatility”](https://doi.org/10.1111/1468-0262.00418), pour la mesure et la prévision de la volatilité réalisée.
 - Campbell and Thompson (2008), [“Predicting Excess Stock Returns Out of Sample: Can Anything Beat the Historical Average?”](https://doi.org/10.1093/rfs/hhm055), pour la moyenne historique comme référence et le score relatif $R^2$ hors échantillon.
 
-Le résultat utile est l'échec de la comparaison. Dès que la moyenne inconditionnelle entre dans le panel, l'avantage apparent des régimes disparaît.
+L'échec de la comparaison est le résultat. Dès que la moyenne inconditionnelle entre dans le panel, l'avantage apparent des régimes disparaît.
