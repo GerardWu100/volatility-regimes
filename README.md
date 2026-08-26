@@ -103,7 +103,3 @@ volatility-regimes/
   historical mean), and a markdown summary.
 - `outputs/figures/walkforward/`: walk-forward diagnostic plots, when
   generated.
-
-## License
-
-All rights reserved. See [LICENSE](LICENSE).
